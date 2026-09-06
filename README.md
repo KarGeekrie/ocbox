@@ -25,6 +25,38 @@ current project directory, with no root privileges required:
 - A locally-running LLM server your machine can reach (e.g. Ollama, vLLM,
   LM Studio, etc.)
 
+### Installing Podman
+
+**Ubuntu:**
+
+```sh
+sudo apt update
+sudo apt install -y podman
+```
+
+**Rocky Linux:**
+
+```sh
+sudo dnf install -y podman
+```
+
+Podman is rootless by default on both once installed - just don't run it (or
+`ocbox`) with `sudo`. If your user doesn't have a subuid/subgid range yet
+(usually already set up by the package on Ubuntu, sometimes not on a fresh
+Rocky install), set one and re-login:
+
+```sh
+sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$USER"
+# then log out and back in, or:
+podman system migrate
+```
+
+Verify it's actually rootless before running `ocbox`:
+
+```sh
+podman info --format '{{.Host.Security.Rootless}}'   # should print "true"
+```
+
 `ocbox` never installs Podman or escalates privileges itself - if a
 prerequisite is missing, it prints exactly what to run and exits.
 
