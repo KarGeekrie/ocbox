@@ -1,0 +1,18 @@
+# Test-only image: same relay.py/entrypoint.sh ocbox actually ships, but with
+# fake_opencode.py standing in for the real `opencode` binary (see
+# fake_opencode.py's docstring for why). Build context is assembled by
+# test_end_to_end.py's test_image_tag fixture, which copies the real
+# src/ocbox/data/{relay.py,entrypoint.sh} alongside this directory's files.
+FROM docker.io/library/python:3.11-slim
+
+COPY relay.py /usr/local/lib/ocbox/relay.py
+COPY entrypoint.sh /usr/local/lib/ocbox/entrypoint.sh
+RUN chmod +x /usr/local/lib/ocbox/entrypoint.sh
+
+RUN mkdir -p /usr/local/lib/ocbox-test
+COPY fake_opencode.py /usr/local/lib/ocbox-test/fake_opencode.py
+COPY opencode /usr/local/bin/opencode
+RUN chmod +x /usr/local/bin/opencode
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/lib/ocbox/entrypoint.sh"]

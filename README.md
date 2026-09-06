@@ -159,6 +159,34 @@ haven't been verified against OpenCode's live documentation. See the
 docstrings in `sandbox.py` and `image.py`, and the project's plan file, for
 what to double-check before relying on this in production.
 
+## Verified against real rootless Podman
+
+`tests/integration/test_end_to_end.py` runs `ocbox`'s actual sandboxing code
+(`sandbox.py`, `network.py`, the real `relay.py`/`entrypoint.sh`) against a
+real rootless Podman container - it swaps in a stand-in for the OpenCode
+binary itself (see `fixtures/fake_opencode.py`) since it doesn't assume
+network access to opencode.ai, but everything else is the genuine mechanism.
+Confirmed working this way:
+
+- `--network=none` really blocks arbitrary egress from inside the container.
+- The Unix-socket relay bridge correctly proxies both directions: the "LLM"
+  reachable from inside a network-isolated container, and the web UI
+  reachable from the host browser.
+- HTTP Basic Auth gating (`OPENCODE_SERVER_USERNAME`/`_PASSWORD`) actually
+  rejects missing/wrong credentials and accepts the right ones.
+- `--userns=keep-id` correctly maps container-written files in `/workspace`
+  to the invoking host user, not root or an arbitrary subuid.
+
+**Gotcha found along the way**: rootless `podman build` sets up build-time
+networking (via slirp4netns) by default even when the build itself does no
+networking, and that setup needs read/write access to `/dev/net/tun`. On a
+host (or nested container) where that device isn't accessible to your user,
+`podman build` fails outright - pass `network=False` to
+`PodmanClient.build()` for build phases that don't need network (as the
+test fixtures do), and expect the real `image.build_project_image()` /
+`image.ensure_base_image()` (which *do* need network for apt/uv/curl) to
+need `/dev/net/tun` access fixed at the host level instead.
+
 ## Development
 
 ```sh
