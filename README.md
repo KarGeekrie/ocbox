@@ -2,18 +2,23 @@
 
 Rootless-Podman sandbox for running the [OpenCode](https://opencode.ai) agent.
 
-`ocbox` launches OpenCode's web UI inside a Podman container scoped to your
-current project directory, with no root privileges required:
+`ocbox` launches OpenCode inside a Podman container scoped to your current
+project directory, with no root privileges required - either through its
+**web UI** (default) or, with `--tui`, directly as an **interactive terminal
+UI** in the invoking terminal. Same sandboxing either way:
 
 - **Filesystem**: only the project directory you run `ocbox` from is mounted
   into the sandbox (read-write). No other host path is visible from inside.
 - **Network**: the container gets `--network=none` - no network device at
   all except loopback. The only thing it can reach is a local LLM server you
-  configure; the only thing that can reach it is your browser, through a pair
-  of relay processes ocbox starts on the host (see "How the isolation
-  works" below).
-- **Auth**: every run generates a fresh token, printed to your terminal, that
-  gates access to the forwarded web UI.
+  configure (see "How the isolation works" below). In web mode, a pair of
+  relay processes ocbox starts on the host is the only thing that can reach
+  back into the container, exposing the UI to your browser; in `--tui` mode
+  nothing is exposed to the host network at all - you're attached directly
+  to the container's terminal.
+- **Auth**: web mode generates a fresh token on every run, printed to your
+  terminal, that gates access to the forwarded web UI. `--tui` mode needs no
+  token - there's no network-exposed UI to protect.
 
 ## Requirements
 
