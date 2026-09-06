@@ -11,6 +11,7 @@ RUN chmod +x /usr/local/lib/ocbox/entrypoint.sh
 
 RUN mkdir -p /usr/local/lib/ocbox-test
 COPY fake_opencode.py /usr/local/lib/ocbox-test/fake_opencode.py
+COPY fake_opencode_tui.py /usr/local/lib/ocbox-test/fake_opencode_tui.py
 COPY opencode /usr/local/bin/opencode
 RUN chmod +x /usr/local/bin/opencode
 

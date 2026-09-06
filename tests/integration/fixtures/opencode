@@ -10,5 +10,13 @@ if [ "${1:-}" = "web" ]; then
     exec python3 /usr/local/lib/ocbox-test/fake_opencode.py "$@"
 fi
 
-echo "ocbox test stub: unsupported opencode subcommand: $*" >&2
+if [ $# -eq 0 ]; then
+    # Test-only stand-in for the interactive TUI: prints a marker and proves
+    # it can reach the LLM relay, then exits - a real `opencode` TUI would
+    # instead stay attached to the terminal.
+    echo "OCBOX-FAKE-TUI-STARTED"
+    exec python3 /usr/local/lib/ocbox-test/fake_opencode_tui.py
+fi
+
+echo "ocbox test stub: unsupported opencode invocation: $*" >&2
 exit 1

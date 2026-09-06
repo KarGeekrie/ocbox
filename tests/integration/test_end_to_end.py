@@ -73,6 +73,9 @@ def test_image_tag() -> str:
         shutil.copy(data_dir() / "relay.py", build_ctx_path / "relay.py")
         shutil.copy(data_dir() / "entrypoint.sh", build_ctx_path / "entrypoint.sh")
         shutil.copy(FIXTURES_DIR / "fake_opencode.py", build_ctx_path / "fake_opencode.py")
+        shutil.copy(
+            FIXTURES_DIR / "fake_opencode_tui.py", build_ctx_path / "fake_opencode_tui.py"
+        )
         shutil.copy(FIXTURES_DIR / "opencode", build_ctx_path / "opencode")
         containerfile_text = (FIXTURES_DIR / "Containerfile.test").read_text()
         # This test image needs no network at build time (no apt/curl steps),
@@ -235,3 +238,52 @@ def test_userns_keep_id_preserves_host_ownership(tmp_path: Path, test_image_tag:
     written = workspace / "written-by-container.txt"
     assert written.read_text() == "hello host\n"
     assert written.stat().st_uid == os.getuid()
+
+
+def test_tui_mode_runs_real_entrypoint_and_reaches_llm(
+    tmp_path: Path, stub_llm: int, test_image_tag: str
+) -> None:
+    """Drives the real entrypoint.sh's OCBOX_MODE=tui branch (exec opencode,
+    no web relay/auth) through real Podman. Runs without `-it` so the test
+    harness doesn't need a real pty - build_podman_run_argv's `-it` handling
+    for a genuine interactive run is covered separately by the mocked
+    argv-construction unit tests (test_sandbox.py).
+    """
+    podman = PodmanClient()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    empty_json = run_dir / "empty.json"
+    empty_json.write_text("{}")
+    empty_dir = run_dir / "empty_dir"
+    empty_dir.mkdir()
+
+    plan = RunPlan(
+        image_tag=test_image_tag,
+        workspace=workspace,
+        run_dir=run_dir,
+        env_file=None,
+        opencode_config=empty_json,
+        agents_json=empty_json,
+        skills_dir=empty_dir,
+        data_volume="ocbox-integration-test-home-tui",
+        container_name="ocbox-integration-test-tui",
+        container_web_port=4096,
+        container_llm_port=8081,
+        mode="tui",
+    )
+
+    llm_relay = network.start_llm_relay(run_dir, "127.0.0.1", stub_llm)
+    bridges = network.NetworkBridges(llm_relay=llm_relay, llm_sock=run_dir / "llm.sock")
+    try:
+        network.wait_for_unix_socket(run_dir / "llm.sock", timeout=5)
+        argv = build_podman_run_argv(plan)
+        assert "-it" in argv  # real invocation would attach a tty
+        argv_without_tty = [a for a in argv if a != "-it"]
+        result = podman.run_capture(argv_without_tty)
+    finally:
+        network.teardown_bridges(bridges)
+
+    assert "OCBOX-FAKE-TUI-STARTED" in result.stdout
+    assert 'LLM-CHECK: {"stub": "llm-response"}' in result.stdout

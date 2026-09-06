@@ -94,3 +94,41 @@ def test_generate_opencode_config_handles_missing_agents_file(tmp_path) -> None:
     cfg = _generate_opencode_config(8081, tmp_path / "does-not-exist.json")
     assert "agents" not in cfg
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
+
+
+def test_argv_web_mode_omits_it_flag() -> None:
+    argv = build_podman_run_argv(_plan(mode="web"))
+    assert "-it" not in argv
+
+
+def test_argv_tui_mode_uses_it_flag() -> None:
+    argv = build_podman_run_argv(_plan(mode="tui"))
+    assert "-it" in argv
+
+
+def test_argv_tui_mode_skips_env_file_when_none() -> None:
+    argv = build_podman_run_argv(_plan(mode="tui", env_file=None))
+    assert "--env-file" not in argv
+
+
+def test_argv_tui_mode_omits_web_port_env() -> None:
+    argv = build_podman_run_argv(_plan(mode="tui", env_file=None))
+    inline_envs = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
+    assert not any(e.startswith("OCBOX_CONTAINER_WEB_PORT=") for e in inline_envs)
+    assert "OCBOX_MODE=tui" in inline_envs
+
+
+def test_argv_web_mode_includes_web_port_env() -> None:
+    argv = build_podman_run_argv(_plan(mode="web"))
+    inline_envs = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
+    assert "OCBOX_CONTAINER_WEB_PORT=4096" in inline_envs
+    assert "OCBOX_MODE=web" in inline_envs
+
+
+def test_argv_tui_mode_still_mounts_workspace_and_config() -> None:
+    argv = build_podman_run_argv(_plan(mode="tui", env_file=None))
+    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    sources = [m.split(":")[0] for m in mounts]
+    assert "/home/user/myproj" in sources
+    assert "/pkg/data/agents.json" in sources
+    assert "/pkg/data/skills" in sources

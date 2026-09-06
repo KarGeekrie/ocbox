@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--web-port", type=int, default=None, help="Host port for the OpenCode web UI.")
     parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Launch OpenCode's terminal UI in this terminal instead of the web UI.",
+    )
+    parser.add_argument(
         "--agents-json", type=Path, default=None, help="Override the default agents.json."
     )
     parser.add_argument(
@@ -60,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     return run(
         cfg,
         cwd,
+        mode="tui" if args.tui else "web",
         non_interactive=args.yes,
         rebuild=args.rebuild,
         cli_apt=args.apt,

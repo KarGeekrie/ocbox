@@ -25,7 +25,6 @@ class RunPlan:
     image_tag: str
     workspace: Path
     run_dir: Path
-    env_file: Path
     opencode_config: Path
     agents_json: Path
     skills_dir: Path
@@ -33,6 +32,8 @@ class RunPlan:
     container_name: str
     container_web_port: int
     container_llm_port: int
+    mode: str = "web"  # "web" or "tui"
+    env_file: Path | None = None  # web-only: gates the forwarded UI, unused for tui
     memory_limit: str | None = None
     pids_limit: int | None = None
 
@@ -55,6 +56,10 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "--tmpfs",
         "/tmp:rw,mode=1777",
         "--init",
+    ]
+    if plan.mode == "tui":
+        argv.append("-it")
+    argv += [
         "-v",
         f"{plan.workspace}:/workspace:rw",
         "-v",
@@ -67,12 +72,18 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
         "-v",
         f"{plan.data_volume}:/home/ocbox:rw",
-        "--env-file",
-        str(plan.env_file),
+    ]
+    if plan.env_file is not None:
+        argv += ["--env-file", str(plan.env_file)]
+    argv += [
+        "-e",
+        f"OCBOX_MODE={plan.mode}",
         "-e",
         f"OCBOX_CONTAINER_LLM_PORT={plan.container_llm_port}",
-        "-e",
-        f"OCBOX_CONTAINER_WEB_PORT={plan.container_web_port}",
+    ]
+    if plan.mode == "web":
+        argv += ["-e", f"OCBOX_CONTAINER_WEB_PORT={plan.container_web_port}"]
+    argv += [
         "-e",
         f"OPENCODE_CONFIG={OPENCODE_CONFIG_MOUNT}",
         "-e",
@@ -124,6 +135,7 @@ def run(
     cfg: Config,
     cwd: Path,
     *,
+    mode: str = "web",
     non_interactive: bool = False,
     rebuild: bool = False,
     cli_apt: list[str] | None = None,
@@ -162,9 +174,12 @@ def run(
         state.image_tag = project_tag
         state.save(st_dir)
 
-    token = auth.generate_token()
-    env_file = run_dir / "env"
-    auth.write_env_file(env_file, token)
+    token: str | None = None
+    env_file: Path | None = None
+    if mode == "web":
+        token = auth.generate_token()
+        env_file = run_dir / "env"
+        auth.write_env_file(env_file, token)
 
     container_llm_port = 8081
     container_web_port = cfg.container_web_port
@@ -192,6 +207,7 @@ def run(
         container_name=container_name,
         container_web_port=container_web_port,
         container_llm_port=container_llm_port,
+        mode=mode,
         memory_limit=cfg.memory_limit,
         pids_limit=cfg.pids_limit,
     )
@@ -206,6 +222,10 @@ def run(
 
     old_handler = signal.signal(signal.SIGINT, _on_sigint)
     try:
+        if mode == "tui":
+            print(f"ocbox: launching OpenCode's TUI in {cwd}\n")
+            return container_proc.wait()
+
         try:
             network.wait_for_unix_socket(run_dir / "web.sock", timeout=60)
         except network.NetworkError:

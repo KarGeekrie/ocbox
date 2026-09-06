@@ -110,16 +110,33 @@ OpenCode is ready.
 Open the URL, sign in with the printed credentials, and OpenCode is running
 against `myapp/`, isolated from the rest of your machine.
 
+### Terminal UI instead of the web UI
+
+Prefer working in the terminal? Pass `--tui`:
+
+```sh
+ocbox --tui
+```
+
+This launches OpenCode's interactive terminal UI directly in your current
+terminal instead of starting the web server - no port is forwarded, no auth
+token is generated (there's nothing exposed to the host network to protect),
+but the same filesystem/network sandboxing applies: only your project
+directory is mounted, and the only network access is to your configured
+`LLM_HOST:LLM_PORT`, exactly as in web mode. Press whatever OpenCode's own
+quit key is (or close the terminal) to stop the sandbox.
+
 Useful flags:
 
 | Flag | Effect |
 |---|---|
+| `--tui` | Launch OpenCode's terminal UI here instead of the web UI |
 | `--yes` / `-y` | Skip the interactive package prompt, use config defaults |
 | `--apt PKG...` / `--uv PKG...` | Set extra packages non-interactively |
 | `--rebuild` | Force a rebuild of the project's sandbox image |
-| `--web-port PORT` | Pin the host port for the web UI |
+| `--web-port PORT` | Pin the host port for the web UI (ignored with `--tui`) |
 | `--agents-json PATH` / `--skills-dir PATH` | Use custom skills/agents instead of the packaged defaults |
-| `--no-open` | Don't auto-open a browser |
+| `--no-open` | Don't auto-open a browser (ignored with `--tui`) |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
 
 ## Default skills & agents
@@ -154,10 +171,12 @@ container-internal port is ever published directly to the host.
 
 A few details of OpenCode's actual CLI/config surface (exact `opencode.json`
 discovery path, whether `opencode web` auto-opens a browser, the real
-skills/agents config schema, etc.) are ocbox's best-effort assumptions and
-haven't been verified against OpenCode's live documentation. See the
-docstrings in `sandbox.py` and `image.py`, and the project's plan file, for
-what to double-check before relying on this in production.
+skills/agents config schema, whether bare `opencode` with no subcommand
+launches the interactive TUI as `--tui` assumes, etc.) are ocbox's
+best-effort assumptions and haven't been verified against OpenCode's live
+documentation. See the docstrings in `sandbox.py`, `image.py`, and
+`data/entrypoint.sh`, and the project's plan file, for what to double-check
+before relying on this in production.
 
 ## Verified against real rootless Podman
 
@@ -176,6 +195,9 @@ Confirmed working this way:
   rejects missing/wrong credentials and accepts the right ones.
 - `--userns=keep-id` correctly maps container-written files in `/workspace`
   to the invoking host user, not root or an arbitrary subuid.
+- `--tui` mode's real `entrypoint.sh` branch (exec straight into OpenCode, no
+  web relay/auth) runs correctly and can still reach the LLM relay from
+  inside the network-isolated container.
 
 **Gotcha found along the way**: rootless `podman build` sets up build-time
 networking (via slirp4netns) by default even when the build itself does no
