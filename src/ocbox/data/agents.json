@@ -1,0 +1,12 @@
+{
+  "_note": "Default skills and agents ocbox bind-mounts read-only into every sandbox. Fill this in with your own agents/skills; ocbox copies it as-is and does not interpret its contents. Field names here are a starting template - verify them against OpenCode's actual agent-config schema before relying on this in production (see the project plan's open question #7). Override per-project with `ocbox --agents-json <path>`.",
+  "agents": [
+    {
+      "name": "default",
+      "description": "Default agent used when the sandbox starts.",
+      "model": "",
+      "skills": []
+    }
+  ],
+  "skills": []
+}

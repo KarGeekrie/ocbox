@@ -1,0 +1,24 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv: fast Python package manager, used to install per-project `uv pip` extras.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --no-modify-path \
+    && mv /root/.local/bin/uv /root/.local/bin/uvx /usr/local/bin/
+
+# OpenCode agent CLI.
+# NOTE: install method below is the officially documented install script as of
+# this writing. Pin/verify against the exact version you want before relying
+# on this in production - see the project plan's open question #3.
+RUN curl -fsSL https://opencode.ai/install | sh \
+    && mv "$HOME"/.opencode/bin/opencode /usr/local/bin/opencode
+
+RUN mkdir -p /usr/local/lib/ocbox
+COPY relay.py /usr/local/lib/ocbox/relay.py
+COPY entrypoint.sh /usr/local/lib/ocbox/entrypoint.sh
+RUN chmod +x /usr/local/lib/ocbox/entrypoint.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/lib/ocbox/entrypoint.sh"]

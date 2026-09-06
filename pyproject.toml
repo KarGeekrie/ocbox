@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ocbox"
+version = "0.1.0"
+description = "Rootless-Podman sandbox for running the OpenCode agent"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "KarGeekrie" }]
+dependencies = []
+
+[project.scripts]
+ocbox = "ocbox.cli:main"
+
+[project.optional-dependencies]
+pretty = ["rich>=13"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ocbox"]
+artifacts = ["src/ocbox/data/**"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
