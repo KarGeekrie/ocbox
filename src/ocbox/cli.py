@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from ocbox.config import ConfigError, load_config
+from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError, run_preflight
 from ocbox.sandbox import run
 
@@ -62,19 +63,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ocbox: {exc}", file=sys.stderr)
         return 1
 
-    return run(
-        cfg,
-        cwd,
-        mode="tui" if args.tui else "web",
-        non_interactive=args.yes,
-        rebuild=args.rebuild,
-        cli_apt=args.apt,
-        cli_uv=args.uv,
-        agents_json=args.agents_json,
-        skills_dir=args.skills_dir,
-        host_web_port=args.web_port,
-        open_browser=not args.no_open,
-    )
+    try:
+        return run(
+            cfg,
+            cwd,
+            mode="tui" if args.tui else "web",
+            non_interactive=args.yes,
+            rebuild=args.rebuild,
+            cli_apt=args.apt,
+            cli_uv=args.uv,
+            agents_json=args.agents_json,
+            skills_dir=args.skills_dir,
+            host_web_port=args.web_port,
+            open_browser=not args.no_open,
+        )
+    except PodmanError as exc:
+        print(f"ocbox: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

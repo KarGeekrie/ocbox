@@ -13,6 +13,31 @@
 #     token - nothing is exposed to the host network at all in this mode.
 set -eu
 
+# Polls 127.0.0.1:<port> until something is listening, or gives up after
+# <max_tries> * 0.2s and exits the whole script. Used for both the LLM relay
+# (so OpenCode's first provider request doesn't race a not-yet-bound port)
+# and, in web mode, for OpenCode's own web server (so the browser's first
+# request doesn't race it either).
+wait_for_port() {
+    _port="$1"
+    _max_tries="$2"
+    _label="$3"
+    _i=0
+    until python3 -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(0.2)
+sys.exit(0 if s.connect_ex(('127.0.0.1', ${_port})) == 0 else 1)
+" 2>/dev/null; do
+        _i=$((_i + 1))
+        if [ "$_i" -ge "$_max_tries" ]; then
+            echo "ocbox: ${_label} never started listening on port ${_port}" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
+}
+
 MODE="${OCBOX_MODE:-web}"
 CONTAINER_LLM_PORT="${OCBOX_CONTAINER_LLM_PORT:?OCBOX_CONTAINER_LLM_PORT not set}"
 
@@ -21,22 +46,7 @@ CONTAINER_LLM_PORT="${OCBOX_CONTAINER_LLM_PORT:?OCBOX_CONTAINER_LLM_PORT not set
 python3 /usr/local/lib/ocbox/relay.py serve-tcp "127.0.0.1:${CONTAINER_LLM_PORT}" \
     --connect-unix /run/ocbox/llm.sock &
 
-# Wait for the LLM relay to actually be listening before starting OpenCode,
-# so its very first provider request doesn't race a not-yet-bound port.
-i=0
-until python3 -c "
-import socket, sys
-s = socket.socket()
-s.settimeout(0.2)
-sys.exit(0 if s.connect_ex(('127.0.0.1', ${CONTAINER_LLM_PORT})) == 0 else 1)
-" 2>/dev/null; do
-    i=$((i + 1))
-    if [ "$i" -ge 50 ]; then
-        echo "ocbox: LLM relay never started listening on port ${CONTAINER_LLM_PORT}" >&2
-        exit 1
-    fi
-    sleep 0.2
-done
+wait_for_port "$CONTAINER_LLM_PORT" 50 "LLM relay"
 
 if [ "$MODE" = "tui" ]; then
     # NOTE: assumes bare `opencode` (no subcommand) launches the interactive
@@ -51,23 +61,7 @@ CONTAINER_WEB_PORT="${OCBOX_CONTAINER_WEB_PORT:?OCBOX_CONTAINER_WEB_PORT not set
 opencode web --hostname 127.0.0.1 --port "${CONTAINER_WEB_PORT}" &
 OPENCODE_PID=$!
 
-# Wait for OpenCode to actually be listening before exposing it through the
-# host-facing relay, so the browser's first request doesn't race a
-# not-yet-bound port.
-i=0
-until python3 -c "
-import socket, sys
-s = socket.socket()
-s.settimeout(0.2)
-sys.exit(0 if s.connect_ex(('127.0.0.1', ${CONTAINER_WEB_PORT})) == 0 else 1)
-" 2>/dev/null; do
-    i=$((i + 1))
-    if [ "$i" -ge 150 ]; then
-        echo "ocbox: opencode web never started listening on port ${CONTAINER_WEB_PORT}" >&2
-        exit 1
-    fi
-    sleep 0.2
-done
+wait_for_port "$CONTAINER_WEB_PORT" 150 "opencode web"
 
 # Web ingress: /run/ocbox/web.sock -> (host relay) -> browser, this side -> opencode web.
 python3 /usr/local/lib/ocbox/relay.py serve-unix /run/ocbox/web.sock \

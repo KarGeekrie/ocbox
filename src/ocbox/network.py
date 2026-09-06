@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.resources
+import shutil
 import socket
 import subprocess
 import sys
@@ -27,6 +28,7 @@ class NetworkBridges:
     llm_sock: Path
     web_relay: subprocess.Popen | None = None
     web_sock: Path | None = None
+    run_dir: Path | None = None  # when set, teardown removes it entirely
 
 
 def relay_script_path() -> Path:
@@ -96,6 +98,14 @@ def teardown_bridges(bridges: NetworkBridges) -> None:
             proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
+
+    if bridges.run_dir is not None:
+        # Removes the socket files along with the auth-token env file and
+        # generated opencode.json that live alongside them - nothing from
+        # this run should linger on disk once it's torn down.
+        shutil.rmtree(bridges.run_dir, ignore_errors=True)
+        return
+
     for sock_path in (bridges.llm_sock, bridges.web_sock):
         if sock_path is not None:
             with contextlib.suppress(FileNotFoundError):

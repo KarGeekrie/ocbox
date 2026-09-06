@@ -1,7 +1,14 @@
 import json
 from pathlib import Path
 
-from ocbox.sandbox import RunPlan, _generate_opencode_config, build_podman_run_argv
+import pytest
+
+from ocbox.sandbox import (
+    SKILLS_DIR_MOUNT,
+    RunPlan,
+    _generate_opencode_config,
+    build_podman_run_argv,
+)
 
 
 def _plan(**overrides) -> RunPlan:
@@ -96,6 +103,11 @@ def test_generate_opencode_config_handles_missing_agents_file(tmp_path) -> None:
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 
 
+def test_generate_opencode_config_references_mounted_skills_dir(tmp_path) -> None:
+    cfg = _generate_opencode_config(8081, tmp_path / "does-not-exist.json")
+    assert cfg["skillsDir"] == SKILLS_DIR_MOUNT
+
+
 def test_argv_web_mode_omits_it_flag() -> None:
     argv = build_podman_run_argv(_plan(mode="web"))
     assert "-it" not in argv
@@ -123,6 +135,21 @@ def test_argv_web_mode_includes_web_port_env() -> None:
     inline_envs = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
     assert "OCBOX_CONTAINER_WEB_PORT=4096" in inline_envs
     assert "OCBOX_MODE=web" in inline_envs
+
+
+def test_runplan_rejects_web_mode_without_env_file() -> None:
+    with pytest.raises(ValueError, match="env_file is required"):
+        _plan(mode="web", env_file=None)
+
+
+def test_runplan_rejects_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="must be 'web' or 'tui'"):
+        _plan(mode="bogus")
+
+
+def test_runplan_tui_mode_allows_no_env_file() -> None:
+    plan = _plan(mode="tui", env_file=None)
+    assert plan.env_file is None
 
 
 def test_argv_tui_mode_still_mounts_workspace_and_config() -> None:

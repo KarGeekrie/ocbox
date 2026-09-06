@@ -43,6 +43,25 @@ class PodmanClient:
         )
         return result.returncode == 0
 
+    def image_label(self, tag: str, label: str) -> str | None:
+        """Returns the value of `label` on `tag`, or None if the image or
+        label doesn't exist."""
+        result = subprocess.run(
+            [
+                self.binary,
+                "inspect",
+                "--format",
+                f'{{{{ index .Config.Labels "{label}" }}}}',
+                tag,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        value = result.stdout.strip()
+        return value or None
+
     def build(
         self,
         containerfile_text: str,

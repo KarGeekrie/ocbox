@@ -37,6 +37,16 @@ class RunPlan:
     memory_limit: str | None = None
     pids_limit: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.mode not in ("web", "tui"):
+            raise ValueError(f"RunPlan.mode must be 'web' or 'tui', got {self.mode!r}")
+        if self.mode == "web" and self.env_file is None:
+            raise ValueError(
+                "RunPlan.env_file is required when mode='web' - it carries the "
+                "auth token that gates the forwarded web UI; without it the "
+                "container would run opencode web with no credentials set."
+            )
+
 
 def build_podman_run_argv(plan: RunPlan) -> list[str]:
     argv = [
@@ -110,10 +120,10 @@ def launch(plan: RunPlan, podman: PodmanClient):
 def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dict:
     """Builds the single opencode.json ocbox mounts into every sandbox.
 
-    Field names for the local-LLM provider and the agents/skills passthrough
-    are ocbox's best guess at OpenCode's config schema - verify against
-    OpenCode's real docs before relying on this (see the project plan's open
-    questions #1 and #7).
+    Field names for the local-LLM provider, the skills directory, and the
+    agents/skills passthrough are ocbox's best guess at OpenCode's config
+    schema - verify against OpenCode's real docs before relying on this (see
+    the project plan's open questions #1 and #7).
     """
     cfg: dict = {
         "provider": {
@@ -122,6 +132,7 @@ def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dic
                 "options": {"baseURL": f"http://127.0.0.1:{container_llm_port}/v1"},
             }
         },
+        "skillsDir": SKILLS_DIR_MOUNT,
     }
     if agents_path.exists():
         agents_data = json.loads(agents_path.read_text())
@@ -156,7 +167,9 @@ def run(
     apt_pkgs, uv_pkgs = prompt_extra_packages(
         cfg, non_interactive=non_interactive, cli_apt=cli_apt, cli_uv=cli_uv
     )
-    fingerprint = image.packages_fingerprint(apt_pkgs, uv_pkgs)
+    fingerprint = image.packages_fingerprint(
+        apt_pkgs, uv_pkgs, cfg.base_image, image.containerfile_fingerprint()
+    )
     project_tag = f"ocbox/project-{slug}:latest"
 
     needs_build = (
@@ -191,7 +204,6 @@ def run(
         json.dumps(_generate_opencode_config(container_llm_port, resolved_agents_json), indent=2)
     )
 
-    resolved_host_web_port = host_web_port or cfg.host_web_port or network.pick_free_port()
     container_name = f"ocbox-{slug}"
     data_volume = f"ocbox-home-{slug}"
 
@@ -213,19 +225,32 @@ def run(
     )
 
     llm_relay = network.start_llm_relay(run_dir, cfg.llm_host, cfg.llm_port)
-    bridges = network.NetworkBridges(llm_relay=llm_relay, llm_sock=run_dir / "llm.sock")
+    bridges = network.NetworkBridges(
+        llm_relay=llm_relay, llm_sock=run_dir / "llm.sock", run_dir=run_dir
+    )
 
     container_proc = launch(plan, podman)
 
     def _on_sigint(signum, frame) -> None:  # noqa: ANN001 - signal handler signature
         podman.stop(container_name)
 
+    if mode == "tui":
+        # No custom handler here: with -it, the terminal already delivers
+        # Ctrl-C straight to the container's foreground process (OpenCode's
+        # own TUI), which should decide how to handle it (e.g. cancel an
+        # in-flight action) rather than have ocbox force-stop the whole
+        # sandbox out from under it.
+        print(f"ocbox: launching OpenCode's TUI in {cwd}\n")
+        try:
+            try:
+                return container_proc.wait()
+            except KeyboardInterrupt:
+                return container_proc.wait()
+        finally:
+            network.teardown_bridges(bridges)
+
     old_handler = signal.signal(signal.SIGINT, _on_sigint)
     try:
-        if mode == "tui":
-            print(f"ocbox: launching OpenCode's TUI in {cwd}\n")
-            return container_proc.wait()
-
         try:
             network.wait_for_unix_socket(run_dir / "web.sock", timeout=60)
         except network.NetworkError:
@@ -236,6 +261,7 @@ def run(
             container_proc.terminate()
             return 1
 
+        resolved_host_web_port = host_web_port or cfg.host_web_port or network.pick_free_port()
         web_relay = network.start_web_relay(run_dir, resolved_host_web_port)
         bridges.web_relay = web_relay
         bridges.web_sock = run_dir / "web.sock"
