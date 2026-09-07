@@ -41,9 +41,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skills-dir", type=Path, default=None, help="Override the default skills/ directory."
     )
-    parser.add_argument(
-        "--no-open", action="store_true", help="Don't automatically open the web UI in a browser."
-    )
     return parser
 
 
@@ -75,7 +72,6 @@ def main(argv: list[str] | None = None) -> int:
             agents_json=args.agents_json,
             skills_dir=args.skills_dir,
             host_web_port=args.web_port,
-            open_browser=not args.no_open,
         )
     except PodmanError as exc:
         print(f"ocbox: {exc}", file=sys.stderr)

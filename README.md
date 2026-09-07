@@ -141,7 +141,6 @@ Useful flags:
 | `--rebuild` | Force a rebuild of the project's sandbox image |
 | `--web-port PORT` | Pin the host port for the web UI (ignored with `--tui`) |
 | `--agents-json PATH` / `--skills-dir PATH` | Use custom skills/agents instead of the packaged defaults |
-| `--no-open` | Don't auto-open a browser (ignored with `--tui`) |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
 
 ## Default skills & agents
@@ -175,13 +174,21 @@ container-internal port is ever published directly to the host.
 ## Known open questions
 
 A few details of OpenCode's actual CLI/config surface (exact `opencode.json`
-discovery path, whether `opencode web` auto-opens a browser, the real
-skills/agents config schema, whether bare `opencode` with no subcommand
-launches the interactive TUI as `--tui` assumes, etc.) are ocbox's
-best-effort assumptions and haven't been verified against OpenCode's live
-documentation. See the docstrings in `sandbox.py`, `image.py`, and
+discovery path, the real skills/agents config schema, etc.) are still
+ocbox's best-effort assumptions and haven't been verified against OpenCode's
+live documentation. See the docstrings in `sandbox.py`, `image.py`, and
 `data/entrypoint.sh`, and the project's plan file, for what to double-check
 before relying on this in production.
+
+Two of these have since been **verified** against opencode 1.18.29 and are
+no longer open:
+
+- `opencode web` does auto-open a browser - it spawns `xdg-open`, which
+  doesn't exist in the sandbox image, so it dumped a stack trace into the
+  terminal on every run. ocbox now runs `opencode serve` (headless, serves
+  the byte-for-byte identical UI) and just prints the URL for you to open.
+- Bare `opencode` with no subcommand really is the interactive TUI
+  (`opencode --help` lists it as the default command), as `--tui` assumes.
 
 ## Verified against real rootless Podman
 

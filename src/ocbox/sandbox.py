@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import signal
 import sys
-import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -154,7 +153,6 @@ def run(
     agents_json: Path | None = None,
     skills_dir: Path | None = None,
     host_web_port: int | None = None,
-    open_browser: bool = True,
 ) -> int:
     podman = PodmanClient()
     slug = project.project_slug(cwd)
@@ -268,8 +266,6 @@ def run(
 
         url = auth.build_web_url(resolved_host_web_port)
         print(auth.format_connect_banner(url, auth.DEFAULT_USERNAME, token))
-        if open_browser:
-            webbrowser.open(url)
 
         return container_proc.wait()
     finally:

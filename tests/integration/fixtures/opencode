@@ -1,11 +1,11 @@
 #!/bin/sh
-# Test-only stand-in for the real `opencode` CLI - forwards `opencode web ...`
+# Test-only stand-in for the real `opencode` CLI - forwards `opencode serve ...`
 # to fake_opencode.py so ocbox's real-Podman integration test can exercise
 # the real, unmodified entrypoint.sh without needing network access to
 # opencode.ai (blocked in the CI/dev sandbox this was validated in).
 set -eu
 
-if [ "${1:-}" = "web" ]; then
+if [ "${1:-}" = "serve" ]; then
     shift
     exec python3 /usr/local/lib/ocbox-test/fake_opencode.py "$@"
 fi

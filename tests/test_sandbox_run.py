@@ -68,7 +68,7 @@ def mocked_run_env(tmp_path, monkeypatch):
 
 
 def test_run_web_mode_generates_auth_and_passes_env_file(tmp_path, mocked_run_env) -> None:
-    exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, open_browser=False)
+    exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
 
     assert exit_code == 0
     mocked_run_env["auth"].generate_token.assert_called_once()
@@ -97,7 +97,7 @@ def test_run_tui_mode_does_not_call_pick_free_port(tmp_path, mocked_run_env) -> 
 def test_run_web_mode_calls_pick_free_port_when_no_port_configured(
     tmp_path, mocked_run_env
 ) -> None:
-    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, open_browser=False)
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
     mocked_run_env["network"].pick_free_port.assert_called_once()
 
 
@@ -123,7 +123,7 @@ def test_run_web_mode_stops_container_on_wait_for_socket_failure(
     mocked_run_env["network"].NetworkError = RuntimeError  # needs a real exception type
     mocked_run_env["network"].wait_for_unix_socket.side_effect = RuntimeError("timed out")
 
-    exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, open_browser=False)
+    exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
 
     assert exit_code == 1
     mocked_run_env["container_proc"].terminate.assert_called_once()
