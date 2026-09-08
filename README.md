@@ -206,7 +206,7 @@ Both follow OpenCode's own conventions (<https://opencode.ai/config.json>):
 
 - **Agents**: one `<name>.md` per agent, with `description`/`mode`
   frontmatter and the body as its prompt. Mounted at
-  `~/.config/opencode/agent`, which is where OpenCode looks for global agents
+  `~/.config/opencode/agents`, where OpenCode looks for global agents
   - there is no config key pointing at an arbitrary agent folder, so the
   mount location is what makes them load. See
   `src/ocbox/data/agents/README.md`.
@@ -214,11 +214,14 @@ Both follow OpenCode's own conventions (<https://opencode.ai/config.json>):
   `description` frontmatter. Registered through `skills.paths` in the
   generated config. See `src/ocbox/data/skills/README.md`.
 
-ocbox ships four agents: `chat` (discussion, editing denied), `review` (finds
-bugs, editing denied), plus `build` and `plan`, which override OpenCode's
-built-ins of the same name to add the sandbox's constraints - no network, only
-`/workspace` writable - to their prompts. Overriding is a merge, so the
-built-ins' permission rules (plan mode's edit denial included) still apply.
+ocbox ships four agents: `chat` (discussion only - editing *and* bash denied,
+since denying edits alone still leaves `echo x > file`), `review` (finds bugs;
+editing denied, bash gated on your approval so `git diff` still works), plus
+`build` and `plan`, which override OpenCode's built-ins of the same name to
+add the sandbox's constraints - no network, only `/workspace` writable - to
+their prompts. Overriding is a merge, and permissions merge per key, so plan
+mode's built-in edit denial survives untouched. All four deny `webfetch`:
+there is no network, so it can only fail.
 
 Check them with `opencode agent list` and `opencode debug skill` from inside a
 sandbox, and the generated config with `opencode debug config`. OpenCode

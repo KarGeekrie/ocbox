@@ -15,12 +15,13 @@ from ocbox.podman_client import PodmanClient
 from ocbox.state import ProjectState
 
 OPENCODE_CONFIG_MOUNT = "/etc/ocbox/opencode.json"
-# OpenCode discovers global agents at $XDG_CONFIG_HOME/opencode/agent/<name>.md.
+# OpenCode discovers global agents at $XDG_CONFIG_HOME/opencode/agents/<name>.md.
 # Unlike skills - which have a `skills.paths` config key - there is no way to
 # point OpenCode at an arbitrary agent folder, so the mount location itself is
 # what makes these load. Nests inside the /home/ocbox volume, which podman
 # handles as long as the volume is mounted first (see build_podman_run_argv).
-AGENTS_DIR_MOUNT = "/home/ocbox/.config/opencode/agent"
+# Singular `agent/` is accepted too, but the docs name the plural, so use it.
+AGENTS_DIR_MOUNT = "/home/ocbox/.config/opencode/agents"
 # The user's own OpenCode settings, mounted as OpenCode's *global* config.
 # Global sits below OPENCODE_CONFIG in OpenCode's precedence order, so ocbox's
 # generated config still wins on the provider endpoint while everything the

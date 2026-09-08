@@ -116,7 +116,7 @@ def test_argv_mounts_agents_dir_at_opencode_discovery_path() -> None:
     path is what makes them load - there is no `agent.paths` config key."""
     argv = build_podman_run_argv(_plan(agents_dir=Path("/pkg/data/agents")))
     assert f"/pkg/data/agents:{AGENTS_DIR_MOUNT}:ro" in argv
-    assert AGENTS_DIR_MOUNT.startswith("/home/ocbox/.config/opencode/")
+    assert AGENTS_DIR_MOUNT == "/home/ocbox/.config/opencode/agents"
 
 
 def test_argv_mounts_user_config_as_opencode_global_config() -> None:

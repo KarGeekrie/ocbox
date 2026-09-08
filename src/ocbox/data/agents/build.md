@@ -1,6 +1,12 @@
 ---
 description: The default agent. Executes tools based on configured permissions.
 mode: primary
+permission:
+  # No network in the sandbox, so this can only ever fail - deny it
+  # rather than let the agent burn turns retrying. Permissions merge
+  # per key, so the built-in's own rules (plan's edit denial included)
+  # are untouched by naming webfetch here.
+  webfetch: deny
 ---
 
 You are working inside an ocbox sandbox. Nothing here changes how you build -

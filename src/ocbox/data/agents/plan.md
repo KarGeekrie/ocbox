@@ -1,6 +1,12 @@
 ---
 description: Plan mode. Disallows all edit tools.
 mode: primary
+permission:
+  # No network in the sandbox, so this can only ever fail - deny it
+  # rather than let the agent burn turns retrying. Permissions merge
+  # per key, so the built-in's own rules (plan's edit denial included)
+  # are untouched by naming webfetch here.
+  webfetch: deny
 ---
 
 You are planning, not building: edit tools are denied for this agent, so the
