@@ -192,10 +192,19 @@ ocbox --tui -- --continue                    # resume the last session
 ocbox --tui -y -- run "explain src/relay.py" # non-interactive, prints and exits
 ```
 
-In web mode they are appended to `opencode serve`, so the global flags
-(`--print-logs`, `--log-level`) are the useful ones there; the session flags
-above belong with `--tui`. See <https://opencode.ai/docs/cli/> for the full
-surface.
+The examples above are `--tui` ones because that is where the session flags
+live. In web mode the arguments go to `opencode serve`, which accepts only
+`--print-logs`, `--log-level`, `--pure`, `--mdns`, `--mdns-domain` and
+`--cors`.
+
+Passing a `--tui` flag such as `--agent` in web mode is worth avoiding
+deliberately: `opencode serve` rejects it, prints its own help, and then never
+starts listening - so ocbox waits 30 seconds and reports `sandbox never became
+ready`, with the real cause scrolled off above and a suggestion to check
+`podman logs` for a container that has already been removed. If you see that,
+look further up for OpenCode's help output.
+
+See <https://opencode.ai/docs/cli/> for the full surface.
 
 Only the first `--` is ocbox's, so `ocbox --tui -- run -- ...` passes the
 second one through untouched. `--port` and `--hostname` are refused: ocbox
