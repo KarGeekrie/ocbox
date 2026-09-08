@@ -156,32 +156,39 @@ Useful flags:
 | `--apt PKG...` / `--uv PKG...` | Set extra packages non-interactively |
 | `--rebuild` | Force a rebuild of the project's sandbox image |
 | `--web-port PORT` | Pin the host port for the web UI (ignored with `--tui`) |
-| `--agents-json PATH` / `--skills-dir PATH` | Use custom skills/agents instead of the packaged defaults |
+| `--agents-dir PATH` / `--skills-dir PATH` | Use custom agents/skills instead of the packaged defaults |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
 
 ## Default skills & agents
 
-`src/ocbox/data/agents.json` and `src/ocbox/data/skills/` are templates you
-can fill in once with the skills/agents you want available in every sandbox,
-instead of reconfiguring OpenCode per project. Both are mounted read-only
-into every container, and ocbox wires them into the `opencode.json` it
-generates. Point `--agents-json`/`--skills-dir` at your own files to override
-them per invocation.
+`src/ocbox/data/agents/` and `src/ocbox/data/skills/` hold the agents and
+skills you want available in every sandbox, instead of reconfiguring OpenCode
+per project. Both are mounted read-only into every container. Point
+`--agents-dir`/`--skills-dir` at your own directories to override them per
+invocation.
 
-Both follow OpenCode's own schema (<https://opencode.ai/config.json>):
+Both follow OpenCode's own conventions (<https://opencode.ai/config.json>):
 
+- **Agents**: one `<name>.md` per agent, with `description`/`mode`
+  frontmatter and the body as its prompt. Mounted at
+  `~/.config/opencode/agent`, which is where OpenCode looks for global agents
+  - there is no config key pointing at an arbitrary agent folder, so the
+  mount location is what makes them load. See
+  `src/ocbox/data/agents/README.md`.
 - **Skills**: one folder per skill, each holding a `SKILL.md` with `name` and
-  `description` frontmatter. ocbox registers the mounted folder through
-  `skills.paths`. See `src/ocbox/data/skills/README.md`.
-- **Agents**: `agents.json` carries an `agent` object *keyed by agent name*
-  (not a list), each value an AgentConfig - `description`, `mode`
-  (`primary`/`subagent`/`all`), `model`, `prompt`, `tools`, and so on. An
-  optional `skills.paths` list there adds folders on top of ocbox's own mount.
+  `description` frontmatter. Registered through `skills.paths` in the
+  generated config. See `src/ocbox/data/skills/README.md`.
 
-Check either with `opencode debug config` (what config survived) and
-`opencode debug skill` (which skills were discovered) from inside a sandbox.
-OpenCode ignores config keys it doesn't recognise without complaining, so a
-wrong name shows up as a feature that quietly does nothing rather than an
+ocbox ships four agents: `chat` (discussion, editing denied), `review` (finds
+bugs, editing denied), plus `build` and `plan`, which override OpenCode's
+built-ins of the same name to add the sandbox's constraints - no network, only
+`/workspace` writable - to their prompts. Overriding is a merge, so the
+built-ins' permission rules (plan mode's edit denial included) still apply.
+
+Check them with `opencode agent list` and `opencode debug skill` from inside a
+sandbox, and the generated config with `opencode debug config`. OpenCode
+ignores config keys and agent files it doesn't recognise without complaining,
+so a mistake shows up as a feature that quietly does nothing rather than an
 error.
 
 ## How the isolation works

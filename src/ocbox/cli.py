@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Launch OpenCode's terminal UI in this terminal instead of the web UI.",
     )
     parser.add_argument(
-        "--agents-json", type=Path, default=None, help="Override the default agents.json."
+        "--agents-dir", type=Path, default=None, help="Override the default agents/ directory."
     )
     parser.add_argument(
         "--skills-dir", type=Path, default=None, help="Override the default skills/ directory."
@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             rebuild=args.rebuild,
             cli_apt=args.apt,
             cli_uv=args.uv,
-            agents_json=args.agents_json,
+            agents_dir=args.agents_dir,
             skills_dir=args.skills_dir,
             host_web_port=args.web_port,
         )

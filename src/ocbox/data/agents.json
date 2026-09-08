@@ -1,7 +1,0 @@
-{
-  "_note": "Default agents and extra skill folders ocbox merges into the opencode.json it mounts into every sandbox. Only the `agent` and `skills` keys below are read; anything else here (this note included) is ignored. Key names follow OpenCode's published schema (https://opencode.ai/config.json): `agent` is an object keyed by agent name - not a list - and each value is an AgentConfig (description, mode, model, prompt, tools, temperature, ...). `skills.paths` adds folders on top of ocbox's own /etc/ocbox/skills mount. OpenCode silently drops keys it doesn't recognise, so check any edit with `opencode debug config`. Override per-project with `ocbox --agents-json <path>`.",
-  "agent": {},
-  "skills": {
-    "paths": []
-  }
-}

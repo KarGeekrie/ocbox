@@ -15,7 +15,12 @@ from ocbox.podman_client import PodmanClient
 from ocbox.state import ProjectState
 
 OPENCODE_CONFIG_MOUNT = "/etc/ocbox/opencode.json"
-AGENTS_JSON_MOUNT = "/etc/ocbox/agents.json"
+# OpenCode discovers global agents at $XDG_CONFIG_HOME/opencode/agent/<name>.md.
+# Unlike skills - which have a `skills.paths` config key - there is no way to
+# point OpenCode at an arbitrary agent folder, so the mount location itself is
+# what makes these load. Nests inside the /home/ocbox volume, which podman
+# handles as long as the volume is mounted first (see build_podman_run_argv).
+AGENTS_DIR_MOUNT = "/home/ocbox/.config/opencode/agent"
 SKILLS_DIR_MOUNT = "/etc/ocbox/skills"
 
 
@@ -25,7 +30,7 @@ class RunPlan:
     workspace: Path
     run_dir: Path
     opencode_config: Path
-    agents_json: Path
+    agents_dir: Path
     skills_dir: Path
     data_volume: str
     container_name: str
@@ -76,11 +81,12 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "-v",
         f"{plan.opencode_config}:{OPENCODE_CONFIG_MOUNT}:ro",
         "-v",
-        f"{plan.agents_json}:{AGENTS_JSON_MOUNT}:ro",
-        "-v",
         f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
         "-v",
         f"{plan.data_volume}:/home/ocbox:rw",
+        # Must follow the /home/ocbox volume above: it mounts inside it.
+        "-v",
+        f"{plan.agents_dir}:{AGENTS_DIR_MOUNT}:ro",
     ]
     if plan.env_file is not None:
         argv += ["--env-file", str(plan.env_file)]
@@ -116,13 +122,16 @@ def launch(plan: RunPlan, podman: PodmanClient):
     return podman.popen(build_podman_run_argv(plan))
 
 
-def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dict:
+def _generate_opencode_config(container_llm_port: int) -> dict:
     """Builds the single opencode.json ocbox mounts into every sandbox.
 
     Key names are verified against OpenCode's published schema
     (https://opencode.ai/config.json, checked at opencode 1.18.29): `provider`
-    keyed by provider name, `skills.paths` for extra skill folders, and
-    `agent` keyed by agent name.
+    keyed by provider name, and `skills.paths` for extra skill folders.
+
+    Agents deliberately aren't here: they're `<name>.md` files bind-mounted at
+    AGENTS_DIR_MOUNT, because OpenCode has no config key pointing at an agent
+    folder the way `skills.paths` does for skills.
 
     Getting a name wrong here fails silently rather than loudly: the schema
     declares additionalProperties=false, but the runtime just drops what it
@@ -131,7 +140,7 @@ def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dic
     OpenCode with nothing in the output to say so - so re-check any change
     here against `opencode debug config`, which prints what actually survived.
     """
-    cfg: dict = {
+    return {
         "provider": {
             "local": {
                 "npm": "@ai-sdk/openai-compatible",
@@ -140,17 +149,6 @@ def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dic
         },
         "skills": {"paths": [SKILLS_DIR_MOUNT]},
     }
-    if agents_path.exists():
-        agents_data = json.loads(agents_path.read_text())
-        agent = agents_data.get("agent")
-        if isinstance(agent, dict) and agent:
-            cfg["agent"] = agent
-        extra_skills = agents_data.get("skills")
-        if isinstance(extra_skills, dict):
-            for path in extra_skills.get("paths", []):
-                if path not in cfg["skills"]["paths"]:
-                    cfg["skills"]["paths"].append(path)
-    return cfg
 
 
 def run(
@@ -162,7 +160,7 @@ def run(
     rebuild: bool = False,
     cli_apt: list[str] | None = None,
     cli_uv: list[str] | None = None,
-    agents_json: Path | None = None,
+    agents_dir: Path | None = None,
     skills_dir: Path | None = None,
     host_web_port: int | None = None,
 ) -> int:
@@ -206,12 +204,12 @@ def run(
 
     container_llm_port = 8081
     container_web_port = cfg.container_web_port
-    resolved_agents_json = agents_json or (image.data_dir() / "agents.json")
+    resolved_agents_dir = agents_dir or (image.data_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.data_dir() / "skills")
 
     opencode_config_path = run_dir / "opencode.json"
     opencode_config_path.write_text(
-        json.dumps(_generate_opencode_config(container_llm_port, resolved_agents_json), indent=2)
+        json.dumps(_generate_opencode_config(container_llm_port), indent=2)
     )
 
     container_name = f"ocbox-{slug}"
@@ -223,7 +221,7 @@ def run(
         run_dir=run_dir,
         env_file=env_file,
         opencode_config=opencode_config_path,
-        agents_json=resolved_agents_json,
+        agents_dir=resolved_agents_dir,
         skills_dir=resolved_skills_dir,
         data_volume=data_volume,
         container_name=container_name,

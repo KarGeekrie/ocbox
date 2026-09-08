@@ -29,7 +29,7 @@ def mocked_run_env(tmp_path, monkeypatch):
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    (data_dir / "agents.json").write_text("{}")
+    (data_dir / "agents").mkdir()
     (data_dir / "skills").mkdir()
 
     with (
