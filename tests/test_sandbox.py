@@ -218,3 +218,25 @@ def test_resolve_user_config_falls_back_to_packaged_default(tmp_path, monkeypatc
     resolved = sandbox._resolve_user_config()
     assert resolved.name == "opencode.jsonc"
     assert resolved.exists(), "the packaged default must ship, it is always mounted"
+
+
+def test_argv_appends_opencode_args_after_the_image_tag() -> None:
+    """They land as the container's CMD, which entrypoint.sh forwards as "$@"."""
+    plan = _plan(opencode_args=["--model", "local/qwen"])
+    argv = build_podman_run_argv(plan)
+    assert argv[-3:] == [plan.image_tag, "--model", "local/qwen"]
+
+
+def test_argv_without_opencode_args_ends_at_the_image_tag() -> None:
+    plan = _plan()
+    assert build_podman_run_argv(plan)[-1] == plan.image_tag
+
+
+def test_check_opencode_args_rejects_flags_ocbox_owns() -> None:
+    for arg in ("--port", "--hostname", "--port=9999"):
+        with pytest.raises(sandbox.OpencodeArgsError):
+            sandbox.check_opencode_args(["--model", "local/qwen", arg])
+
+
+def test_check_opencode_args_allows_everything_else() -> None:
+    sandbox.check_opencode_args(["run", "--model", "local/qwen", "--agent", "review"])

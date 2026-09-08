@@ -181,6 +181,27 @@ directory is mounted, and the only network access is to your configured
 `LLM_HOST:LLM_PORT`, exactly as in web mode. Press whatever OpenCode's own
 quit key is (or close the terminal) to stop the sandbox.
 
+### Passing arguments through to OpenCode
+
+Anything after a bare `--` goes to OpenCode itself, verbatim:
+
+```sh
+ocbox --tui -- --agent chat                  # start the TUI on a given agent
+ocbox --tui -- --model local/qwen2.5:7b      # pick the model up front
+ocbox --tui -- --continue                    # resume the last session
+ocbox --tui -y -- run "explain src/relay.py" # non-interactive, prints and exits
+```
+
+In web mode they are appended to `opencode serve`, so the global flags
+(`--print-logs`, `--log-level`) are the useful ones there; the session flags
+above belong with `--tui`. See <https://opencode.ai/docs/cli/> for the full
+surface.
+
+Only the first `--` is ocbox's, so `ocbox --tui -- run -- ...` passes the
+second one through untouched. `--port` and `--hostname` are refused: ocbox
+sets them to wire OpenCode to the relay, and a second value would detach it.
+Use `--web-port` to choose the host port instead.
+
 Useful flags:
 
 | Flag | Effect |
@@ -193,6 +214,7 @@ Useful flags:
 | `--agents-dir PATH` / `--skills-dir PATH` | Use custom agents/skills instead of the packaged defaults |
 | `--opencode-config PATH` | OpenCode settings (models, theme, ...) instead of `~/.config/ocbox/opencode.jsonc` |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
+| `-- ARGS...` | Everything after `--` is forwarded to OpenCode itself |
 
 ## Default skills & agents
 

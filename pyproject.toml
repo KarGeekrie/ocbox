@@ -1,10 +1,12 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "ocbox"
-version = "0.1.0"
+# Derived from the git tag rather than written here, so a release is one
+# `git tag` and the number can't drift from what was actually tagged.
+dynamic = ["version"]
 description = "Rootless-Podman sandbox for running the OpenCode agent"
 readme = "README.md"
 license = "MIT"
@@ -19,6 +21,9 @@ ocbox = "ocbox.cli:main"
 pretty = ["rich>=13"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11"]
 
+[tool.hatch.version]
+source = "vcs"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ocbox"]
 artifacts = ["src/ocbox/data/**"]
@@ -26,6 +31,30 @@ artifacts = ["src/ocbox/data/**"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# Pinned explicitly rather than left to ruff's default set. The dev extra
+# tracks ruff loosely, and its defaults widen between releases - which already
+# happened once here, surfacing 16 findings on untouched code and turning four
+# `# noqa` directives into dead weight. An upgrade should be a decision, not a
+# surprise, so new rules arrive only when this list changes.
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    # pylint, minus its PLR "refactor" category: those are advisory opinions
+    # about argument counts and magic numbers, not defects. The rest catch
+    # real mistakes, like subprocess.run without an explicit check.
+    "PLC",  # pylint conventions
+    "PLE",  # pylint errors
+    "PLW",  # pylint warnings
+    "RUF",  # ruff-specific
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

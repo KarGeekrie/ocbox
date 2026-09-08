@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from ocbox import cli
 from ocbox.cli import build_parser, main
 from ocbox.config import ConfigError
 from ocbox.podman_client import PodmanError
@@ -66,3 +67,21 @@ def test_main_passes_tui_mode_through(mock_run, mock_config, mock_preflight) -> 
 def test_main_defaults_to_web_mode(mock_run, mock_config, mock_preflight) -> None:
     main([])
     assert mock_run.call_args.kwargs["mode"] == "web"
+
+
+def test_split_opencode_args_without_separator() -> None:
+    assert cli.split_opencode_args(["--tui", "--yes"]) == (["--tui", "--yes"], [])
+
+
+def test_split_opencode_args_forwards_the_tail() -> None:
+    ocbox_argv, opencode_args = cli.split_opencode_args(
+        ["--tui", "--", "--model", "local/qwen", "--agent", "chat"]
+    )
+    assert ocbox_argv == ["--tui"]
+    assert opencode_args == ["--model", "local/qwen", "--agent", "chat"]
+
+
+def test_split_opencode_args_keeps_later_separators_for_opencode() -> None:
+    """Only the first `--` is ocbox's; `opencode run -- ...` must survive."""
+    _, opencode_args = cli.split_opencode_args(["--", "run", "--", "hello"])
+    assert opencode_args == ["run", "--", "hello"]

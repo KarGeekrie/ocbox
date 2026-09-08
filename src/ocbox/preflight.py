@@ -32,7 +32,9 @@ def check_podman_installed() -> str:
             ["podman", "--version"], capture_output=True, text=True, check=True
         )
     except (subprocess.CalledProcessError, OSError) as exc:
-        raise PreflightError(f"Found podman at {path} but `podman --version` failed: {exc}") from exc
+        raise PreflightError(
+            f"Found podman at {path} but `podman --version` failed: {exc}"
+        ) from exc
     return result.stdout.strip()
 
 
@@ -70,8 +72,8 @@ def check_subuid_subgid() -> None:
     def _has_range(path: Path) -> bool:
         if not path.exists():
             return False
-        for line in path.read_text().splitlines():
-            line = line.strip()
+        for raw_line in path.read_text().splitlines():
+            line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
             name = line.split(":", 1)[0]

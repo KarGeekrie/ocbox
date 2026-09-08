@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import signal
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ocbox import auth, image, network, project
@@ -54,6 +54,8 @@ class RunPlan:
     env_file: Path | None = None  # web-only: gates the forwarded UI, unused for tui
     memory_limit: str | None = None
     pids_limit: int | None = None
+    # OpenCode's own arguments, forwarded verbatim from `ocbox ... -- <args>`.
+    opencode_args: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.mode not in ("web", "tui"):
@@ -131,6 +133,9 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
     if plan.pids_limit:
         argv += ["--pids-limit", str(plan.pids_limit)]
     argv.append(plan.image_tag)
+    # Anything after the image tag is CMD, which entrypoint.sh receives as "$@"
+    # and forwards to opencode itself.
+    argv += plan.opencode_args
     return argv
 
 
@@ -139,6 +144,27 @@ def launch(plan: RunPlan, podman: PodmanClient):
 
 
 USER_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "opencode.jsonc"
+
+
+# ocbox sets these itself: the web UI is reached through a relay bound to a
+# port ocbox chose, so a second --port/--hostname on the same command line
+# either conflicts or silently detaches OpenCode from the bridge.
+RESERVED_OPENCODE_FLAGS = ("--port", "--hostname")
+
+
+class OpencodeArgsError(ValueError):
+    """Raised when forwarded OpenCode args would break the sandbox."""
+
+
+def check_opencode_args(args: list[str]) -> None:
+    for arg in args:
+        flag = arg.split("=", 1)[0]
+        if flag in RESERVED_OPENCODE_FLAGS:
+            raise OpencodeArgsError(
+                f"{flag} is set by ocbox and can't be forwarded - it would detach "
+                "OpenCode from the relay that exposes it. Use --web-port to choose "
+                "the port you connect to on the host."
+            )
 
 
 def _resolve_user_config() -> Path:
@@ -193,6 +219,7 @@ def run(
     agents_dir: Path | None = None,
     skills_dir: Path | None = None,
     user_config: Path | None = None,
+    opencode_args: list[str] | None = None,
     host_web_port: int | None = None,
 ) -> int:
     podman = PodmanClient()
@@ -255,6 +282,7 @@ def run(
         opencode_config=opencode_config_path,
         agents_dir=resolved_agents_dir,
         user_config=resolved_user_config,
+        opencode_args=list(opencode_args or []),
         skills_dir=resolved_skills_dir,
         data_volume=data_volume,
         container_name=container_name,

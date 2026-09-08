@@ -7,16 +7,22 @@ from pathlib import Path
 from ocbox.config import ConfigError, load_config
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError, run_preflight
-from ocbox.sandbox import run
+from ocbox.sandbox import OpencodeArgsError, check_opencode_args, run
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ocbox",
-        description="Run OpenCode inside a rootless-Podman sandbox scoped to the current directory.",
+        description=(
+            "Run OpenCode inside a rootless-Podman sandbox "
+            "scoped to the current directory."
+        ),
     )
     parser.add_argument(
-        "--config", type=Path, default=None, help="Path to conf.py (default: ~/.config/ocbox/conf.py)"
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to conf.py (default: ~/.config/ocbox/conf.py)",
     )
     parser.add_argument(
         "--yes",
@@ -29,7 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rebuild", action="store_true", help="Force a rebuild of the project's sandbox image."
     )
-    parser.add_argument("--web-port", type=int, default=None, help="Host port for the OpenCode web UI.")
+    parser.add_argument(
+        "--web-port", type=int, default=None, help="Host port for the OpenCode web UI."
+    )
     parser.add_argument(
         "--tui",
         action="store_true",
@@ -51,9 +59,32 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def split_opencode_args(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Splits ocbox's own arguments from OpenCode's at the first bare `--`.
+
+    Done by hand rather than with argparse.REMAINDER, which only behaves if
+    the passthrough is the last positional and swallows unknown ocbox flags
+    into it silently - a typo like `--tuo` would be forwarded to OpenCode
+    instead of being reported.
+    """
+    if "--" not in argv:
+        return argv, []
+    cut = argv.index("--")
+    return argv[:cut], argv[cut + 1 :]
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    ocbox_argv, opencode_args = split_opencode_args(
+        list(argv) if argv is not None else sys.argv[1:]
+    )
+    args = build_parser().parse_args(ocbox_argv)
     cwd = Path.cwd()
+
+    try:
+        check_opencode_args(opencode_args)
+    except OpencodeArgsError as exc:
+        print(f"ocbox: {exc}", file=sys.stderr)
+        return 1
 
     try:
         run_preflight()
@@ -80,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             user_config=args.opencode_config,
             skills_dir=args.skills_dir,
             host_web_port=args.web_port,
+            opencode_args=opencode_args,
         )
     except PodmanError as exc:
         print(f"ocbox: {exc}", file=sys.stderr)
