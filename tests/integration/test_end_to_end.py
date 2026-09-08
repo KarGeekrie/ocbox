@@ -31,7 +31,7 @@ import pytest
 
 from ocbox import network
 from ocbox.image import data_dir
-from ocbox.podman_client import PodmanClient
+from ocbox.podman_client import PodmanClient, PodmanError
 from ocbox.sandbox import RunPlan, build_podman_run_argv
 
 pytestmark = pytest.mark.skipif(
@@ -287,3 +287,58 @@ def test_tui_mode_runs_real_entrypoint_and_reaches_llm(
 
     assert "OCBOX-FAKE-TUI-STARTED" in result.stdout
     assert 'LLM-CHECK: {"stub": "llm-response"}' in result.stdout
+
+
+def _web_mode_argv(test_image_tag: str, run_dir: Path, extra_env: list[str]) -> list[str]:
+    """Raw `podman run` argv for entrypoint.sh's web branch, bypassing
+    RunPlan/build_podman_run_argv entirely - RunPlan.__post_init__ itself
+    now refuses to construct a mode='web' plan without an env_file, so
+    exercising entrypoint.sh's *own* fail-closed check needs a call that
+    doesn't go through that guard.
+    """
+    return [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-e",
+        "OCBOX_MODE=web",
+        "-e",
+        "OCBOX_CONTAINER_LLM_PORT=8081",
+        "-e",
+        "OCBOX_CONTAINER_WEB_PORT=4096",
+        *extra_env,
+        "-v",
+        f"{run_dir}:/run/ocbox:rw",
+        test_image_tag,
+    ]
+
+
+def test_web_mode_refuses_to_start_without_password(tmp_path: Path, test_image_tag: str) -> None:
+    """Proves entrypoint.sh's own fail-closed check: web mode won't start
+    opencode serve at all without OPENCODE_SERVER_PASSWORD set, even if
+    something bypasses ocbox's own host-side RunPlan guard.
+    """
+    podman = PodmanClient()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+
+    with pytest.raises(PodmanError, match="refusing to start web mode without a password"):
+        podman.run_capture(_web_mode_argv(test_image_tag, run_dir, extra_env=[]))
+
+
+def test_web_mode_refuses_to_start_with_empty_password(
+    tmp_path: Path, test_image_tag: str
+) -> None:
+    """A password variable that's set but blank must fail closed too - an
+    empty Basic Auth password would quietly leave the forwarded UI open.
+    """
+    podman = PodmanClient()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+
+    argv = _web_mode_argv(
+        test_image_tag, run_dir, extra_env=["-e", "OPENCODE_SERVER_PASSWORD="]
+    )
+    with pytest.raises(PodmanError, match="refusing to start web mode without a password"):
+        podman.run_capture(argv)
