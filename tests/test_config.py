@@ -24,7 +24,7 @@ def test_loads_required_fields(tmp_path: Path) -> None:
     assert cfg.llm_host == "10.0.0.5"
     assert cfg.llm_port == 11434
     assert cfg.base_image == "ocbox/base:latest"
-    assert cfg.base_os == "debian"
+    assert cfg.base_os == "ubuntu"
 
 
 def test_loads_optional_overrides(tmp_path: Path) -> None:

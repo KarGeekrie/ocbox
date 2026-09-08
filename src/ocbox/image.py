@@ -21,7 +21,7 @@ DISTROS = {
     "ubuntu": "apt",
     "rocky": "dnf",
 }
-DEFAULT_BASE_OS = "debian"
+DEFAULT_BASE_OS = "ubuntu"
 
 
 def data_dir() -> Path:

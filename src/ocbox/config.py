@@ -20,7 +20,7 @@ LLM_HOST = "127.0.0.1"
 LLM_PORT = 11434
 
 # Optional overrides (defaults shown):
-# BASE_OS = "debian"            # or "ubuntu", "rocky"
+# BASE_OS = "ubuntu"            # or "debian", "rocky"
 # BASE_IMAGE = "ocbox/base:latest"
 # CONTAINER_WEB_PORT = 4096
 # HOST_WEB_PORT = None          # None picks a free ephemeral port

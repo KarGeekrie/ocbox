@@ -81,7 +81,7 @@ LLM_HOST = "127.0.0.1"
 LLM_PORT = 11434           # e.g. Ollama's default port
 
 # Optional overrides (defaults shown):
-# BASE_OS = "debian"             # or "ubuntu", "rocky"
+# BASE_OS = "ubuntu"             # or "debian", "rocky"
 # BASE_IMAGE = "ocbox/base:latest"
 # CONTAINER_WEB_PORT = 4096
 # HOST_WEB_PORT = None          # None picks a free ephemeral port
@@ -96,8 +96,8 @@ project root.
 
 ### Choosing the sandbox's OS
 
-`BASE_OS` picks which distro the sandbox image is built from: `"debian"`
-(default, `debian:bookworm-slim`), `"ubuntu"` (`ubuntu:24.04`), or `"rocky"`
+`BASE_OS` picks which distro the sandbox image is built from: `"ubuntu"`
+(default, `ubuntu:24.04`), `"debian"` (`debian:bookworm-slim`), or `"rocky"`
 (`rockylinux:9`). An unrecognized value raises a clear error at startup
 rather than silently falling back to something.
 
