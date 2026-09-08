@@ -1,0 +1,36 @@
+{
+  // ocbox mounts this file into every sandbox as OpenCode's *global* config.
+  //
+  // Its job is to tell OpenCode which models your LLM server actually serves.
+  // Without at least one entry under "models" below, OpenCode has a provider
+  // it can reach but nothing to select, and the sandbox is unusable - check
+  // with `opencode models` from inside a sandbox: you want `local/...` lines.
+  //
+  // Copy this to ~/.config/ocbox/opencode.jsonc and fill it in; ocbox uses
+  // that copy when it exists, and this (empty) default otherwise. Point
+  // --opencode-config at another file to override per invocation.
+  //
+  // Do not set provider.local.options.baseURL here: ocbox generates it to
+  // point at the relay that reaches your LLM, and its config takes precedence
+  // over this file, so anything you put there is ignored.
+
+  "$schema": "https://opencode.ai/config.json",
+
+  "provider": {
+    "local": {
+      "models": {
+        // One entry per model your server serves. The key is the model id
+        // exactly as the server reports it - `ollama list`, or
+        // `curl http://<your-llm-host>:<port>/v1/models`.
+        //
+        // "qwen2.5-coder:7b": { "name": "Qwen2.5 Coder 7B" },
+        // "llama3.1:8b": { "name": "Llama 3.1 8B" }
+      }
+    }
+  }
+
+  // Anything else from https://opencode.ai/config.json works here too - a
+  // default "model", "theme", "permission" rules, and so on. ocbox's own
+  // config only sets the provider endpoint and the skills path, so the rest
+  // is yours.
+}

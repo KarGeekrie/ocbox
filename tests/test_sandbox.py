@@ -2,9 +2,11 @@ from pathlib import Path
 
 import pytest
 
+from ocbox import sandbox
 from ocbox.sandbox import (
     AGENTS_DIR_MOUNT,
     SKILLS_DIR_MOUNT,
+    USER_CONFIG_MOUNT,
     RunPlan,
     _generate_opencode_config,
     build_podman_run_argv,
@@ -19,6 +21,7 @@ def _plan(**overrides) -> RunPlan:
         "env_file": Path("/run/user/1000/ocbox/myproj/env"),
         "opencode_config": Path("/run/user/1000/ocbox/myproj/opencode.json"),
         "agents_dir": Path("/pkg/data/agents"),
+        "user_config": Path("/pkg/data/opencode.jsonc"),
         "skills_dir": Path("/pkg/data/skills"),
         "data_volume": "ocbox-home-myproj",
         "container_name": "ocbox-myproj",
@@ -116,6 +119,22 @@ def test_argv_mounts_agents_dir_at_opencode_discovery_path() -> None:
     assert AGENTS_DIR_MOUNT.startswith("/home/ocbox/.config/opencode/")
 
 
+def test_argv_mounts_user_config_as_opencode_global_config() -> None:
+    """Mounted at OpenCode's *global* config path on purpose: global ranks
+    below OPENCODE_CONFIG, so ocbox keeps control of the provider endpoint
+    while the user's model list is merged in."""
+    argv = build_podman_run_argv(_plan(user_config=Path("/home/u/.config/ocbox/opencode.jsonc")))
+    assert f"/home/u/.config/ocbox/opencode.jsonc:{USER_CONFIG_MOUNT}:ro" in argv
+    assert USER_CONFIG_MOUNT == "/home/ocbox/.config/opencode/opencode.jsonc"
+
+
+def test_argv_mounts_user_config_after_the_home_volume_it_nests_in() -> None:
+    argv = build_podman_run_argv(_plan())
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    user_config = next(i for i, a in enumerate(argv) if a.endswith(f":{USER_CONFIG_MOUNT}:ro"))
+    assert home_volume < user_config
+
+
 def test_argv_mounts_agents_dir_after_the_home_volume_it_nests_in() -> None:
     """The agents mount lives inside /home/ocbox; podman needs the volume
     mounted first or the nested bind is shadowed."""
@@ -176,3 +195,17 @@ def test_argv_tui_mode_still_mounts_workspace_and_config() -> None:
     assert "/home/user/myproj" in sources
     assert "/pkg/data/agents" in sources
     assert "/pkg/data/skills" in sources
+
+
+def test_resolve_user_config_prefers_the_users_file(tmp_path, monkeypatch) -> None:
+    user_file = tmp_path / "opencode.jsonc"
+    user_file.write_text("{}")
+    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", user_file)
+    assert sandbox._resolve_user_config() == user_file
+
+
+def test_resolve_user_config_falls_back_to_packaged_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", tmp_path / "absent.jsonc")
+    resolved = sandbox._resolve_user_config()
+    assert resolved.name == "opencode.jsonc"
+    assert resolved.exists(), "the packaged default must ship, it is always mounted"

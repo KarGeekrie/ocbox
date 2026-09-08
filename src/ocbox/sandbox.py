@@ -21,6 +21,13 @@ OPENCODE_CONFIG_MOUNT = "/etc/ocbox/opencode.json"
 # what makes these load. Nests inside the /home/ocbox volume, which podman
 # handles as long as the volume is mounted first (see build_podman_run_argv).
 AGENTS_DIR_MOUNT = "/home/ocbox/.config/opencode/agent"
+# The user's own OpenCode settings, mounted as OpenCode's *global* config.
+# Global sits below OPENCODE_CONFIG in OpenCode's precedence order, so ocbox's
+# generated config still wins on the provider endpoint while everything the
+# user puts here - crucially the model list, without which nothing is
+# selectable - is merged in. Deep-merged, not replaced: user `models` and
+# ocbox's `options.baseURL` end up in the same provider block.
+USER_CONFIG_MOUNT = "/home/ocbox/.config/opencode/opencode.jsonc"
 SKILLS_DIR_MOUNT = "/etc/ocbox/skills"
 
 
@@ -32,6 +39,7 @@ class RunPlan:
     opencode_config: Path
     agents_dir: Path
     skills_dir: Path
+    user_config: Path
     data_volume: str
     container_name: str
     container_web_port: int
@@ -84,9 +92,11 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
         "-v",
         f"{plan.data_volume}:/home/ocbox:rw",
-        # Must follow the /home/ocbox volume above: it mounts inside it.
+        # Must follow the /home/ocbox volume above: they mount inside it.
         "-v",
         f"{plan.agents_dir}:{AGENTS_DIR_MOUNT}:ro",
+        "-v",
+        f"{plan.user_config}:{USER_CONFIG_MOUNT}:ro",
     ]
     if plan.env_file is not None:
         argv += ["--env-file", str(plan.env_file)]
@@ -120,6 +130,21 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
 
 def launch(plan: RunPlan, podman: PodmanClient):
     return podman.popen(build_podman_run_argv(plan))
+
+
+USER_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "opencode.jsonc"
+
+
+def _resolve_user_config() -> Path:
+    """The user's own OpenCode settings, or the packaged empty default.
+
+    Kept next to conf.py in ~/.config/ocbox/ because what belongs here - the
+    list of models your LLM server serves - is a property of that server, the
+    same thing LLM_HOST/LLM_PORT describe.
+    """
+    if USER_CONFIG_PATH.exists():
+        return USER_CONFIG_PATH
+    return image.data_dir() / "opencode.jsonc"
 
 
 def _generate_opencode_config(container_llm_port: int) -> dict:
@@ -162,6 +187,7 @@ def run(
     cli_uv: list[str] | None = None,
     agents_dir: Path | None = None,
     skills_dir: Path | None = None,
+    user_config: Path | None = None,
     host_web_port: int | None = None,
 ) -> int:
     podman = PodmanClient()
@@ -206,6 +232,7 @@ def run(
     container_web_port = cfg.container_web_port
     resolved_agents_dir = agents_dir or (image.data_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.data_dir() / "skills")
+    resolved_user_config = user_config or _resolve_user_config()
 
     opencode_config_path = run_dir / "opencode.json"
     opencode_config_path.write_text(
@@ -222,6 +249,7 @@ def run(
         env_file=env_file,
         opencode_config=opencode_config_path,
         agents_dir=resolved_agents_dir,
+        user_config=resolved_user_config,
         skills_dir=resolved_skills_dir,
         data_volume=data_volume,
         container_name=container_name,

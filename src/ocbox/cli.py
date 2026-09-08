@@ -39,6 +39,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--agents-dir", type=Path, default=None, help="Override the default agents/ directory."
     )
     parser.add_argument(
+        "--opencode-config",
+        type=Path,
+        default=None,
+        help="OpenCode settings (models, theme, ...) to mount into the sandbox. "
+        "Defaults to ~/.config/ocbox/opencode.jsonc when it exists.",
+    )
+    parser.add_argument(
         "--skills-dir", type=Path, default=None, help="Override the default skills/ directory."
     )
     return parser
@@ -70,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             cli_apt=args.apt,
             cli_uv=args.uv,
             agents_dir=args.agents_dir,
+            user_config=args.opencode_config,
             skills_dir=args.skills_dir,
             host_web_port=args.web_port,
         )

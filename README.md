@@ -109,6 +109,40 @@ on Rocky). Switching `BASE_OS` automatically triggers a rebuild the next
 time you run `ocbox`, the same way an ocbox upgrade does - see "Verified
 against real rootless Podman" below.
 
+### Telling OpenCode which models you have
+
+`conf.py` says *where* your LLM server is; OpenCode also needs to know *what*
+it serves. Without that, it has an endpoint it can reach and nothing to
+select - the sandbox comes up but no model is usable.
+
+Create `~/.config/ocbox/opencode.jsonc`:
+
+```jsonc
+{
+  // Comments are fine - this is JSONC.
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "local": {
+      "models": {
+        // Key = the model id exactly as your server reports it
+        // (`ollama list`, or curl http://<host>:<port>/v1/models).
+        "qwen2.5-coder:7b": { "name": "Qwen2.5 Coder 7B" }
+      }
+    }
+  }
+}
+```
+
+ocbox mounts this as OpenCode's *global* config, which sits below ocbox's own
+generated config in OpenCode's precedence order. Everything you put here is
+merged in, but ocbox keeps control of `provider.local.options.baseURL` - that
+points at the relay reaching your LLM, so setting it yourself has no effect.
+Anything else from <https://opencode.ai/config.json> works here: a default
+`model`, `theme`, `permission` rules, and so on.
+
+Check it landed with `opencode models` from inside a sandbox - you want to see
+`local/...` lines. `--opencode-config PATH` overrides the file per run.
+
 ## Usage
 
 ```sh
@@ -157,6 +191,7 @@ Useful flags:
 | `--rebuild` | Force a rebuild of the project's sandbox image |
 | `--web-port PORT` | Pin the host port for the web UI (ignored with `--tui`) |
 | `--agents-dir PATH` / `--skills-dir PATH` | Use custom agents/skills instead of the packaged defaults |
+| `--opencode-config PATH` | OpenCode settings (models, theme, ...) instead of `~/.config/ocbox/opencode.jsonc` |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
 
 ## Default skills & agents
