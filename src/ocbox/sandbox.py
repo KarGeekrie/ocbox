@@ -29,7 +29,12 @@ AGENTS_DIR_MOUNT = "/home/ocbox/.config/opencode/agents"
 # selectable - is merged in. Deep-merged, not replaced: user `models` and
 # ocbox's `options.baseURL` end up in the same provider block.
 USER_CONFIG_MOUNT = "/home/ocbox/.config/opencode/opencode.jsonc"
-SKILLS_DIR_MOUNT = "/etc/ocbox/skills"
+# Same story as agents: mounted at OpenCode's documented global skills
+# location rather than registered through the `skills.paths` config key.
+# Both work, but one mechanism for both beats two, and it leaves the
+# generated config holding only the thing ocbox actually owns - the relay
+# endpoint. Also nests inside /home/ocbox, so it mounts after the volume.
+SKILLS_DIR_MOUNT = "/home/ocbox/.config/opencode/skills"
 
 
 @dataclass
@@ -90,12 +95,12 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "-v",
         f"{plan.opencode_config}:{OPENCODE_CONFIG_MOUNT}:ro",
         "-v",
-        f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
-        "-v",
         f"{plan.data_volume}:/home/ocbox:rw",
         # Must follow the /home/ocbox volume above: they mount inside it.
         "-v",
         f"{plan.agents_dir}:{AGENTS_DIR_MOUNT}:ro",
+        "-v",
+        f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
         "-v",
         f"{plan.user_config}:{USER_CONFIG_MOUNT}:ro",
     ]
@@ -151,20 +156,20 @@ def _resolve_user_config() -> Path:
 def _generate_opencode_config(container_llm_port: int) -> dict:
     """Builds the single opencode.json ocbox mounts into every sandbox.
 
-    Key names are verified against OpenCode's published schema
-    (https://opencode.ai/config.json, checked at opencode 1.18.29): `provider`
-    keyed by provider name, and `skills.paths` for extra skill folders.
+    Only the provider is generated, because it is the only part ocbox owns:
+    the baseURL points at the relay bridging the container to the user's LLM.
+    Agents and skills aren't here - they're files mounted at the locations
+    OpenCode already searches - and the models belong to the user's own
+    opencode.jsonc, mounted as OpenCode's global config.
 
-    Agents deliberately aren't here: they're `<name>.md` files bind-mounted at
-    AGENTS_DIR_MOUNT, because OpenCode has no config key pointing at an agent
-    folder the way `skills.paths` does for skills.
-
-    Getting a name wrong here fails silently rather than loudly: the schema
-    declares additionalProperties=false, but the runtime just drops what it
-    doesn't recognise. Earlier guesses at `skillsDir` and a list-valued
-    `agents` did exactly that, leaving the mounted skills/agents invisible to
-    OpenCode with nothing in the output to say so - so re-check any change
-    here against `opencode debug config`, which prints what actually survived.
+    Key names verified against OpenCode's published schema
+    (https://opencode.ai/config.json, checked at opencode 1.18.29). Getting one
+    wrong fails silently rather than loudly: the schema declares
+    additionalProperties=false, but the runtime just drops what it doesn't
+    recognise. Earlier guesses at `skillsDir` and a list-valued `agents` did
+    exactly that, leaving mounted skills and agents invisible with nothing in
+    the output to say so - so re-check any change here against
+    `opencode debug config`, which prints what actually survived.
     """
     return {
         "provider": {
@@ -172,8 +177,7 @@ def _generate_opencode_config(container_llm_port: int) -> dict:
                 "npm": "@ai-sdk/openai-compatible",
                 "options": {"baseURL": f"http://127.0.0.1:{container_llm_port}/v1"},
             }
-        },
-        "skills": {"paths": [SKILLS_DIR_MOUNT]},
+        }
     }
 
 

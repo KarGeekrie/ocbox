@@ -96,9 +96,12 @@ def test_generate_opencode_config_points_at_container_llm_port() -> None:
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 
 
-def test_generate_opencode_config_references_mounted_skills_dir() -> None:
+def test_generate_opencode_config_generates_only_the_provider() -> None:
+    """Everything else is a mounted file: agents and skills sit where OpenCode
+    already looks, models come from the user's own opencode.jsonc. The relay
+    endpoint is the only thing ocbox has to synthesise."""
     cfg = _generate_opencode_config(8081)
-    assert cfg["skills"]["paths"] == [SKILLS_DIR_MOUNT]
+    assert set(cfg) == {"provider"}
 
 
 def test_generate_opencode_config_uses_only_real_schema_keys() -> None:
@@ -106,17 +109,23 @@ def test_generate_opencode_config_uses_only_real_schema_keys() -> None:
     unknown keys silently, so a typo here disables a feature with no error -
     which is exactly how `skillsDir`/`agents` went unnoticed."""
     cfg = _generate_opencode_config(8081)
-    assert set(cfg) == {"provider", "skills"}
     assert "skillsDir" not in cfg
     assert "agents" not in cfg
 
 
-def test_argv_mounts_agents_dir_at_opencode_discovery_path() -> None:
-    """OpenCode only finds global agents under its config dir, so the mount
-    path is what makes them load - there is no `agent.paths` config key."""
-    argv = build_podman_run_argv(_plan(agents_dir=Path("/pkg/data/agents")))
-    assert f"/pkg/data/agents:{AGENTS_DIR_MOUNT}:ro" in argv
-    assert AGENTS_DIR_MOUNT == "/home/ocbox/.config/opencode/agents"
+def test_argv_mounts_skills_dir_at_opencode_discovery_path() -> None:
+    """Same mechanism as agents: OpenCode finds these because of where they
+    are, so no `skills.paths` entry is needed in the generated config."""
+    argv = build_podman_run_argv(_plan(skills_dir=Path("/pkg/data/skills")))
+    assert f"/pkg/data/skills:{SKILLS_DIR_MOUNT}:ro" in argv
+    assert SKILLS_DIR_MOUNT == "/home/ocbox/.config/opencode/skills"
+
+
+def test_argv_mounts_skills_dir_after_the_home_volume_it_nests_in() -> None:
+    argv = build_podman_run_argv(_plan())
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    skills = next(i for i, a in enumerate(argv) if a.endswith(f":{SKILLS_DIR_MOUNT}:ro"))
+    assert home_volume < skills
 
 
 def test_argv_mounts_user_config_as_opencode_global_config() -> None:

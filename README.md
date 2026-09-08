@@ -202,17 +202,19 @@ per project. Both are mounted read-only into every container. Point
 `--agents-dir`/`--skills-dir` at your own directories to override them per
 invocation.
 
-Both follow OpenCode's own conventions (<https://opencode.ai/config.json>):
+Both are found because of *where* they are mounted - OpenCode's own global
+config directory - rather than through any config key, so the `opencode.json`
+ocbox generates holds nothing but the provider endpoint:
 
 - **Agents**: one `<name>.md` per agent, with `description`/`mode`
   frontmatter and the body as its prompt. Mounted at
-  `~/.config/opencode/agents`, where OpenCode looks for global agents
-  - there is no config key pointing at an arbitrary agent folder, so the
-  mount location is what makes them load. See
+  `~/.config/opencode/agents`, where OpenCode looks for global agents. See
   `src/ocbox/data/agents/README.md`.
-- **Skills**: one folder per skill, each holding a `SKILL.md` with `name` and
-  `description` frontmatter. Registered through `skills.paths` in the
-  generated config. See `src/ocbox/data/skills/README.md`.
+- **Skills**: one folder per skill, each holding a `SKILL.md` with required
+  `name` and `description` frontmatter. Mounted at
+  `~/.config/opencode/skills`, the documented location for global skills, so
+  the same mechanism as agents - no config key involved. See
+  `src/ocbox/data/skills/README.md`.
 
 ocbox ships four agents: `chat` (discussion only - editing *and* bash denied,
 since denying edits alone still leaves `echo x > file`), `review` (finds bugs;
