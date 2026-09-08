@@ -15,8 +15,26 @@ from ocbox.podman_client import PodmanClient
 from ocbox.state import ProjectState
 
 OPENCODE_CONFIG_MOUNT = "/etc/ocbox/opencode.json"
-AGENTS_JSON_MOUNT = "/etc/ocbox/agents.json"
-SKILLS_DIR_MOUNT = "/etc/ocbox/skills"
+# OpenCode discovers global agents at $XDG_CONFIG_HOME/opencode/agents/<name>.md.
+# Unlike skills - which have a `skills.paths` config key - there is no way to
+# point OpenCode at an arbitrary agent folder, so the mount location itself is
+# what makes these load. Nests inside the /home/ocbox volume, which podman
+# handles as long as the volume is mounted first (see build_podman_run_argv).
+# Singular `agent/` is accepted too, but the docs name the plural, so use it.
+AGENTS_DIR_MOUNT = "/home/ocbox/.config/opencode/agents"
+# The user's own OpenCode settings, mounted as OpenCode's *global* config.
+# Global sits below OPENCODE_CONFIG in OpenCode's precedence order, so ocbox's
+# generated config still wins on the provider endpoint while everything the
+# user puts here - crucially the model list, without which nothing is
+# selectable - is merged in. Deep-merged, not replaced: user `models` and
+# ocbox's `options.baseURL` end up in the same provider block.
+USER_CONFIG_MOUNT = "/home/ocbox/.config/opencode/opencode.jsonc"
+# Same story as agents: mounted at OpenCode's documented global skills
+# location rather than registered through the `skills.paths` config key.
+# Both work, but one mechanism for both beats two, and it leaves the
+# generated config holding only the thing ocbox actually owns - the relay
+# endpoint. Also nests inside /home/ocbox, so it mounts after the volume.
+SKILLS_DIR_MOUNT = "/home/ocbox/.config/opencode/skills"
 
 
 @dataclass
@@ -25,8 +43,9 @@ class RunPlan:
     workspace: Path
     run_dir: Path
     opencode_config: Path
-    agents_json: Path
+    agents_dir: Path
     skills_dir: Path
+    user_config: Path
     data_volume: str
     container_name: str
     container_web_port: int
@@ -76,11 +95,14 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "-v",
         f"{plan.opencode_config}:{OPENCODE_CONFIG_MOUNT}:ro",
         "-v",
-        f"{plan.agents_json}:{AGENTS_JSON_MOUNT}:ro",
+        f"{plan.data_volume}:/home/ocbox:rw",
+        # Must follow the /home/ocbox volume above: they mount inside it.
+        "-v",
+        f"{plan.agents_dir}:{AGENTS_DIR_MOUNT}:ro",
         "-v",
         f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
         "-v",
-        f"{plan.data_volume}:/home/ocbox:rw",
+        f"{plan.user_config}:{USER_CONFIG_MOUNT}:ro",
     ]
     if plan.env_file is not None:
         argv += ["--env-file", str(plan.env_file)]
@@ -116,29 +138,47 @@ def launch(plan: RunPlan, podman: PodmanClient):
     return podman.popen(build_podman_run_argv(plan))
 
 
-def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dict:
+USER_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "opencode.jsonc"
+
+
+def _resolve_user_config() -> Path:
+    """The user's own OpenCode settings, or the packaged empty default.
+
+    Kept next to conf.py in ~/.config/ocbox/ because what belongs here - the
+    list of models your LLM server serves - is a property of that server, the
+    same thing LLM_HOST/LLM_PORT describe.
+    """
+    if USER_CONFIG_PATH.exists():
+        return USER_CONFIG_PATH
+    return image.data_dir() / "opencode.jsonc"
+
+
+def _generate_opencode_config(container_llm_port: int) -> dict:
     """Builds the single opencode.json ocbox mounts into every sandbox.
 
-    Field names for the local-LLM provider, the skills directory, and the
-    agents/skills passthrough are ocbox's best guess at OpenCode's config
-    schema - verify against OpenCode's real docs before relying on this (see
-    the project plan's open questions #1 and #7).
+    Only the provider is generated, because it is the only part ocbox owns:
+    the baseURL points at the relay bridging the container to the user's LLM.
+    Agents and skills aren't here - they're files mounted at the locations
+    OpenCode already searches - and the models belong to the user's own
+    opencode.jsonc, mounted as OpenCode's global config.
+
+    Key names verified against OpenCode's published schema
+    (https://opencode.ai/config.json, checked at opencode 1.18.29). Getting one
+    wrong fails silently rather than loudly: the schema declares
+    additionalProperties=false, but the runtime just drops what it doesn't
+    recognise. Earlier guesses at `skillsDir` and a list-valued `agents` did
+    exactly that, leaving mounted skills and agents invisible with nothing in
+    the output to say so - so re-check any change here against
+    `opencode debug config`, which prints what actually survived.
     """
-    cfg: dict = {
+    return {
         "provider": {
             "local": {
                 "npm": "@ai-sdk/openai-compatible",
                 "options": {"baseURL": f"http://127.0.0.1:{container_llm_port}/v1"},
             }
-        },
-        "skillsDir": SKILLS_DIR_MOUNT,
+        }
     }
-    if agents_path.exists():
-        agents_data = json.loads(agents_path.read_text())
-        for key in ("agents", "skills"):
-            if key in agents_data:
-                cfg[key] = agents_data[key]
-    return cfg
 
 
 def run(
@@ -150,8 +190,9 @@ def run(
     rebuild: bool = False,
     cli_apt: list[str] | None = None,
     cli_uv: list[str] | None = None,
-    agents_json: Path | None = None,
+    agents_dir: Path | None = None,
     skills_dir: Path | None = None,
+    user_config: Path | None = None,
     host_web_port: int | None = None,
 ) -> int:
     podman = PodmanClient()
@@ -194,12 +235,13 @@ def run(
 
     container_llm_port = 8081
     container_web_port = cfg.container_web_port
-    resolved_agents_json = agents_json or (image.data_dir() / "agents.json")
+    resolved_agents_dir = agents_dir or (image.data_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.data_dir() / "skills")
+    resolved_user_config = user_config or _resolve_user_config()
 
     opencode_config_path = run_dir / "opencode.json"
     opencode_config_path.write_text(
-        json.dumps(_generate_opencode_config(container_llm_port, resolved_agents_json), indent=2)
+        json.dumps(_generate_opencode_config(container_llm_port), indent=2)
     )
 
     container_name = f"ocbox-{slug}"
@@ -211,7 +253,8 @@ def run(
         run_dir=run_dir,
         env_file=env_file,
         opencode_config=opencode_config_path,
-        agents_json=resolved_agents_json,
+        agents_dir=resolved_agents_dir,
+        user_config=resolved_user_config,
         skills_dir=resolved_skills_dir,
         data_volume=data_volume,
         container_name=container_name,

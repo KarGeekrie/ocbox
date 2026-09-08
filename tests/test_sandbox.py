@@ -1,10 +1,12 @@
-import json
 from pathlib import Path
 
 import pytest
 
+from ocbox import sandbox
 from ocbox.sandbox import (
+    AGENTS_DIR_MOUNT,
     SKILLS_DIR_MOUNT,
+    USER_CONFIG_MOUNT,
     RunPlan,
     _generate_opencode_config,
     build_podman_run_argv,
@@ -18,7 +20,8 @@ def _plan(**overrides) -> RunPlan:
         "run_dir": Path("/run/user/1000/ocbox/myproj"),
         "env_file": Path("/run/user/1000/ocbox/myproj/env"),
         "opencode_config": Path("/run/user/1000/ocbox/myproj/opencode.json"),
-        "agents_json": Path("/pkg/data/agents.json"),
+        "agents_dir": Path("/pkg/data/agents"),
+        "user_config": Path("/pkg/data/opencode.jsonc"),
         "skills_dir": Path("/pkg/data/skills"),
         "data_volume": "ocbox-home-myproj",
         "container_name": "ocbox-myproj",
@@ -88,24 +91,66 @@ def test_argv_includes_resource_limits_when_set() -> None:
     assert argv[argv.index("--pids-limit") + 1] == "256"
 
 
-def test_generate_opencode_config_points_at_container_llm_port(tmp_path) -> None:
-    agents_path = tmp_path / "agents.json"
-    agents_path.write_text(json.dumps({"agents": [{"name": "default"}], "skills": []}))
-
-    cfg = _generate_opencode_config(8081, agents_path)
+def test_generate_opencode_config_points_at_container_llm_port() -> None:
+    cfg = _generate_opencode_config(8081)
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
-    assert cfg["agents"] == [{"name": "default"}]
 
 
-def test_generate_opencode_config_handles_missing_agents_file(tmp_path) -> None:
-    cfg = _generate_opencode_config(8081, tmp_path / "does-not-exist.json")
+def test_generate_opencode_config_generates_only_the_provider() -> None:
+    """Everything else is a mounted file: agents and skills sit where OpenCode
+    already looks, models come from the user's own opencode.jsonc. The relay
+    endpoint is the only thing ocbox has to synthesise."""
+    cfg = _generate_opencode_config(8081)
+    assert set(cfg) == {"provider"}
+
+
+def test_generate_opencode_config_uses_only_real_schema_keys() -> None:
+    """OpenCode's schema is additionalProperties=false but its runtime drops
+    unknown keys silently, so a typo here disables a feature with no error -
+    which is exactly how `skillsDir`/`agents` went unnoticed."""
+    cfg = _generate_opencode_config(8081)
+    assert "skillsDir" not in cfg
     assert "agents" not in cfg
-    assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 
 
-def test_generate_opencode_config_references_mounted_skills_dir(tmp_path) -> None:
-    cfg = _generate_opencode_config(8081, tmp_path / "does-not-exist.json")
-    assert cfg["skillsDir"] == SKILLS_DIR_MOUNT
+def test_argv_mounts_skills_dir_at_opencode_discovery_path() -> None:
+    """Same mechanism as agents: OpenCode finds these because of where they
+    are, so no `skills.paths` entry is needed in the generated config."""
+    argv = build_podman_run_argv(_plan(skills_dir=Path("/pkg/data/skills")))
+    assert f"/pkg/data/skills:{SKILLS_DIR_MOUNT}:ro" in argv
+    assert SKILLS_DIR_MOUNT == "/home/ocbox/.config/opencode/skills"
+
+
+def test_argv_mounts_skills_dir_after_the_home_volume_it_nests_in() -> None:
+    argv = build_podman_run_argv(_plan())
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    skills = next(i for i, a in enumerate(argv) if a.endswith(f":{SKILLS_DIR_MOUNT}:ro"))
+    assert home_volume < skills
+
+
+def test_argv_mounts_user_config_as_opencode_global_config() -> None:
+    """Mounted at OpenCode's *global* config path on purpose: global ranks
+    below OPENCODE_CONFIG, so ocbox keeps control of the provider endpoint
+    while the user's model list is merged in."""
+    argv = build_podman_run_argv(_plan(user_config=Path("/home/u/.config/ocbox/opencode.jsonc")))
+    assert f"/home/u/.config/ocbox/opencode.jsonc:{USER_CONFIG_MOUNT}:ro" in argv
+    assert USER_CONFIG_MOUNT == "/home/ocbox/.config/opencode/opencode.jsonc"
+
+
+def test_argv_mounts_user_config_after_the_home_volume_it_nests_in() -> None:
+    argv = build_podman_run_argv(_plan())
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    user_config = next(i for i, a in enumerate(argv) if a.endswith(f":{USER_CONFIG_MOUNT}:ro"))
+    assert home_volume < user_config
+
+
+def test_argv_mounts_agents_dir_after_the_home_volume_it_nests_in() -> None:
+    """The agents mount lives inside /home/ocbox; podman needs the volume
+    mounted first or the nested bind is shadowed."""
+    argv = build_podman_run_argv(_plan())
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    agents = next(i for i, a in enumerate(argv) if a.endswith(f":{AGENTS_DIR_MOUNT}:ro"))
+    assert home_volume < agents
 
 
 def test_argv_web_mode_omits_it_flag() -> None:
@@ -157,5 +202,19 @@ def test_argv_tui_mode_still_mounts_workspace_and_config() -> None:
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
     sources = [m.split(":")[0] for m in mounts]
     assert "/home/user/myproj" in sources
-    assert "/pkg/data/agents.json" in sources
+    assert "/pkg/data/agents" in sources
     assert "/pkg/data/skills" in sources
+
+
+def test_resolve_user_config_prefers_the_users_file(tmp_path, monkeypatch) -> None:
+    user_file = tmp_path / "opencode.jsonc"
+    user_file.write_text("{}")
+    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", user_file)
+    assert sandbox._resolve_user_config() == user_file
+
+
+def test_resolve_user_config_falls_back_to_packaged_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", tmp_path / "absent.jsonc")
+    resolved = sandbox._resolve_user_config()
+    assert resolved.name == "opencode.jsonc"
+    assert resolved.exists(), "the packaged default must ship, it is always mounted"

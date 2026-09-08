@@ -11,9 +11,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | bash -s -- --no-modify-path \
     && mv /root/.local/bin/uv /root/.local/bin/uvx /usr/local/bin/
 
 # OpenCode agent CLI.
-# NOTE: install method below is the officially documented install script as of
-# this writing. Pin/verify against the exact version you want before relying
-# on this in production - see the project plan's open question #3.
+# NOTE: this is the officially documented install script, and it installs
+# whatever version is current at build time. Pin to an exact version
+# (`| bash -s -- --version X.Y.Z`) before relying on this in production.
 RUN curl -fsSL https://opencode.ai/install | bash \
     && mv "$HOME"/.opencode/bin/opencode /usr/local/bin/opencode
 
