@@ -57,11 +57,22 @@ fi
 
 CONTAINER_WEB_PORT="${OCBOX_CONTAINER_WEB_PORT:?OCBOX_CONTAINER_WEB_PORT not set}"
 
+# Basic Auth is the only thing gating the forwarded web UI, so an empty
+# password would quietly expose it to anything that can reach the host port.
+# OpenCode merely warns about that, on the stdout we drop just below - so
+# check it here instead, where it can still fail closed.
+: "${OPENCODE_SERVER_PASSWORD:?refusing to start web mode without a password}"
+
 # `serve`, not `web`: both serve the identical UI (verified byte-for-byte),
 # but `opencode web` also spawns xdg-open, which doesn't exist in this image -
 # it dumped a stack trace into the user's terminal on every run. ocbox prints
 # the URL instead and lets the user open it themselves.
-opencode serve --hostname 127.0.0.1 --port "${CONTAINER_WEB_PORT}" &
+#
+# stdout is dropped because its only content is a banner advertising
+# http://127.0.0.1:${CONTAINER_WEB_PORT} - the *container-internal* port,
+# unreachable from the host and contradicting the URL ocbox prints. stderr
+# stays attached so genuine failures still surface.
+opencode serve --hostname 127.0.0.1 --port "${CONTAINER_WEB_PORT}" >/dev/null &
 OPENCODE_PID=$!
 
 wait_for_port "$CONTAINER_WEB_PORT" 150 "opencode serve"
