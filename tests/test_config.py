@@ -24,6 +24,7 @@ def test_loads_required_fields(tmp_path: Path) -> None:
     assert cfg.llm_host == "10.0.0.5"
     assert cfg.llm_port == 11434
     assert cfg.base_image == "ocbox/base:latest"
+    assert cfg.base_os == "debian"
 
 
 def test_loads_optional_overrides(tmp_path: Path) -> None:
@@ -65,3 +66,36 @@ def test_invalid_python_raises(tmp_path: Path) -> None:
     conf.write_text("this is not valid python (((\n")
     with pytest.raises(ConfigError, match="Error executing"):
         load_config(explicit_path=conf)
+
+
+def test_base_os_ubuntu_accepted(tmp_path: Path) -> None:
+    conf = tmp_path / "conf.py"
+    conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\nBASE_OS = 'ubuntu'\n")
+    cfg = load_config(explicit_path=conf)
+    assert cfg.base_os == "ubuntu"
+
+
+def test_base_os_rocky_accepted(tmp_path: Path) -> None:
+    conf = tmp_path / "conf.py"
+    conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\nBASE_OS = 'rocky'\n")
+    cfg = load_config(explicit_path=conf)
+    assert cfg.base_os == "rocky"
+
+
+def test_base_os_unknown_value_rejected(tmp_path: Path) -> None:
+    conf = tmp_path / "conf.py"
+    conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\nBASE_OS = 'arch'\n")
+    with pytest.raises(ConfigError, match="not supported"):
+        load_config(explicit_path=conf)
+
+
+def test_base_os_project_override(tmp_path: Path) -> None:
+    global_conf = tmp_path / "global.py"
+    global_conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\n")
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "ocbox.conf.py").write_text("BASE_OS = 'rocky'\n")
+
+    cfg = load_config(explicit_path=global_conf, project_dir=project_dir)
+    assert cfg.base_os == "rocky"

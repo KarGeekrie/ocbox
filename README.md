@@ -81,10 +81,11 @@ LLM_HOST = "127.0.0.1"
 LLM_PORT = 11434           # e.g. Ollama's default port
 
 # Optional overrides (defaults shown):
+# BASE_OS = "debian"             # or "ubuntu", "rocky"
 # BASE_IMAGE = "ocbox/base:latest"
 # CONTAINER_WEB_PORT = 4096
 # HOST_WEB_PORT = None          # None picks a free ephemeral port
-# EXTRA_APT_DEFAULT = []
+# EXTRA_APT_DEFAULT = []        # package names for BASE_OS's package manager
 # EXTRA_UV_DEFAULT = []
 # MEMORY_LIMIT = None           # e.g. "2g"
 # PIDS_LIMIT = None             # e.g. 512
@@ -92,6 +93,21 @@ LLM_PORT = 11434           # e.g. Ollama's default port
 
 A project can override any of these by adding its own `ocbox.conf.py` in the
 project root.
+
+### Choosing the sandbox's OS
+
+`BASE_OS` picks which distro the sandbox image is built from: `"debian"`
+(default, `debian:bookworm-slim`), `"ubuntu"` (`ubuntu:24.04`), or `"rocky"`
+(`rockylinux:9`). An unrecognized value raises a clear error at startup
+rather than silently falling back to something.
+
+This changes which package manager `--apt`/`EXTRA_APT_DEFAULT` uses too -
+`apt` on Debian/Ubuntu, `dnf` on Rocky - so package names need to be valid
+for whichever distro you picked (e.g. `EXTRA_APT_DEFAULT = ["git"]` works
+unchanged across all three, but a Debian-specific package name won't exist
+on Rocky). Switching `BASE_OS` automatically triggers a rebuild the next
+time you run `ocbox`, the same way an ocbox upgrade does - see "Verified
+against real rootless Podman" below.
 
 ## Usage
 
@@ -210,6 +226,13 @@ Confirmed working this way:
 - `--tui` mode's real `entrypoint.sh` branch (exec straight into OpenCode, no
   web relay/auth) runs correctly and can still reach the LLM relay from
   inside the network-isolated container.
+- `BASE_OS` switching: selecting a different distro under the same image
+  tag correctly triggers a rebuild (verified for `debian`/`ubuntu`, whose
+  build mechanics are otherwise identical - `apt`, same Containerfile
+  shape); re-selecting the same distro doesn't rebuild. The `rocky`
+  Containerfile itself (the actual `dnf install` line) has **not** been
+  built against a real Rocky mirror - the dev sandbox this was validated in
+  had no route to dl.rockylinux.org. Verify it builds before relying on it.
 
 **Gotcha found along the way**: rootless `podman build` sets up build-time
 networking (via slirp4netns) by default even when the build itself does no

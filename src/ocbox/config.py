@@ -7,6 +7,8 @@ import types
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ocbox.image import DEFAULT_BASE_OS, DISTROS
+
 GLOBAL_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "conf.py"
 PROJECT_CONFIG_NAME = "ocbox.conf.py"
 
@@ -18,10 +20,11 @@ LLM_HOST = "127.0.0.1"
 LLM_PORT = 11434
 
 # Optional overrides (defaults shown):
+# BASE_OS = "debian"            # or "ubuntu", "rocky"
 # BASE_IMAGE = "ocbox/base:latest"
 # CONTAINER_WEB_PORT = 4096
 # HOST_WEB_PORT = None          # None picks a free ephemeral port
-# EXTRA_APT_DEFAULT = []
+# EXTRA_APT_DEFAULT = []        # package names for BASE_OS's package manager
 # EXTRA_UV_DEFAULT = []
 # MEMORY_LIMIT = None           # e.g. "2g"
 # PIDS_LIMIT = None             # e.g. 512
@@ -36,6 +39,7 @@ class ConfigError(Exception):
 class Config:
     llm_host: str
     llm_port: int
+    base_os: str = DEFAULT_BASE_OS
     base_image: str = "ocbox/base:latest"
     container_web_port: int = 4096
     host_web_port: int | None = None
@@ -62,6 +66,14 @@ def _apply_overrides(cfg: Config, module: types.ModuleType) -> Config:
         cfg.llm_host = str(module.LLM_HOST)
     if hasattr(module, "LLM_PORT"):
         cfg.llm_port = int(module.LLM_PORT)
+    if hasattr(module, "BASE_OS"):
+        base_os = str(module.BASE_OS)
+        if base_os not in DISTROS:
+            raise ConfigError(
+                f"BASE_OS {base_os!r} is not supported; choose one of: "
+                f"{', '.join(sorted(DISTROS))}"
+            )
+        cfg.base_os = base_os
     if hasattr(module, "BASE_IMAGE"):
         cfg.base_image = str(module.BASE_IMAGE)
     if hasattr(module, "CONTAINER_WEB_PORT"):

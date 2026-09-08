@@ -160,13 +160,13 @@ def run(
     st_dir = project.state_dir(slug)
     state = ProjectState.load(st_dir)
 
-    image.ensure_base_image(podman, cfg.base_image)
+    image.ensure_base_image(podman, cfg.base_image, cfg.base_os)
 
     apt_pkgs, uv_pkgs = prompt_extra_packages(
         cfg, non_interactive=non_interactive, cli_apt=cli_apt, cli_uv=cli_uv
     )
     fingerprint = image.packages_fingerprint(
-        apt_pkgs, uv_pkgs, cfg.base_image, image.containerfile_fingerprint()
+        apt_pkgs, uv_pkgs, cfg.base_image, image.containerfile_fingerprint(cfg.base_os)
     )
     project_tag = f"ocbox/project-{slug}:latest"
 
@@ -179,7 +179,7 @@ def run(
         build_context = st_dir / "build-context"
         build_context.mkdir(exist_ok=True)
         image.build_project_image(
-            podman, cfg.base_image, project_tag, apt_pkgs, uv_pkgs, build_context
+            podman, cfg.base_image, project_tag, apt_pkgs, uv_pkgs, build_context, cfg.base_os
         )
         state.packages_fingerprint = fingerprint
         state.image_tag = project_tag

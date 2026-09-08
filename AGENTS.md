@@ -92,7 +92,19 @@ exactly how the integration tests were validated during initial development
   `entrypoint.sh`) triggers a rebuild instead of silently reusing a stale
   cached image forever. If you change any file under `src/ocbox/data/`,
   this rebuild-triggering is why you don't need to bump a version number by
-  hand.
+  hand. The base OS is selectable (`BASE_OS` in `conf.py` -
+  debian/ubuntu/rocky) - each distro's Containerfile lives under
+  `data/distros/<name>/Containerfile` and shares the same `relay.py`/
+  `entrypoint.sh` (COPY'd from the shared top-level `data/` context
+  regardless of which distro Containerfile is in use). `image.DISTROS` maps
+  each name to its package manager (`apt` or `dnf`), which
+  `build_project_image()` uses to install a project's extra packages. When
+  adding a distro variant, register it in `image.DISTROS` and add its
+  Containerfile - `containerfile_fingerprint()`/`ensure_base_image()` pick
+  the rest up automatically. The `rocky` variant was written but never
+  built against a real Rocky mirror (network-blocked in the dev sandbox
+  that validated this) - see the README's "Verified against real rootless
+  Podman" section before trusting it as-is.
 - `data/entrypoint.sh` is POSIX `sh`, not bash - keep it that way (it runs
   inside a minimal container image). Test changes to it via the integration
   suite, not just `sh -n`.

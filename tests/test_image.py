@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from ocbox import image
 
 
@@ -31,6 +33,22 @@ def test_packages_fingerprint_differs_when_base_content_changes() -> None:
 
 def test_containerfile_fingerprint_is_deterministic() -> None:
     assert image.containerfile_fingerprint() == image.containerfile_fingerprint()
+
+
+def test_all_supported_distros_have_a_containerfile_on_disk() -> None:
+    for base_os in image.DISTROS:
+        path = image.data_dir() / "distros" / base_os / "Containerfile"
+        assert path.is_file(), f"missing Containerfile for BASE_OS={base_os!r}"
+
+
+def test_containerfile_fingerprint_differs_between_distros() -> None:
+    fingerprints = {base_os: image.containerfile_fingerprint(base_os) for base_os in image.DISTROS}
+    assert len(set(fingerprints.values())) == len(fingerprints)
+
+
+def test_containerfile_fingerprint_rejects_unknown_distro() -> None:
+    with pytest.raises(ValueError, match="Unknown BASE_OS"):
+        image.containerfile_fingerprint("arch")
 
 
 def test_ensure_base_image_skips_build_if_present_and_hash_matches() -> None:
@@ -73,6 +91,32 @@ def test_ensure_base_image_rebuilds_when_label_missing() -> None:
     podman.build.assert_called_once()
 
 
+def test_ensure_base_image_uses_the_selected_distros_containerfile() -> None:
+    podman = MagicMock()
+    podman.image_exists.return_value = False
+    image.ensure_base_image(podman, "ocbox/base:latest", "ubuntu")
+    containerfile_text = podman.build.call_args[0][0]
+    assert "FROM ubuntu:24.04" in containerfile_text
+
+
+def test_ensure_base_image_rejects_unknown_distro() -> None:
+    podman = MagicMock()
+    with pytest.raises(ValueError, match="Unknown BASE_OS"):
+        image.ensure_base_image(podman, "ocbox/base:latest", "arch")
+    podman.build.assert_not_called()
+
+
+def test_ensure_base_image_distro_switch_forces_rebuild() -> None:
+    """A cached image built as debian, with BASE_OS switched to ubuntu -
+    must rebuild even though the tag name and image_exists() haven't
+    changed, since the content hash now points at a different Containerfile."""
+    podman = MagicMock()
+    podman.image_exists.return_value = True
+    podman.image_label.return_value = image.containerfile_fingerprint("debian")
+    image.ensure_base_image(podman, "ocbox/base:latest", "ubuntu")
+    podman.build.assert_called_once()
+
+
 def test_build_project_image_generates_containerfile_with_packages(tmp_path) -> None:
     podman = MagicMock()
     image.build_project_image(
@@ -102,3 +146,30 @@ def test_build_project_image_quotes_package_names(tmp_path) -> None:
     )
     containerfile_text = podman.build.call_args[0][0]
     assert "'pkg; rm -rf /'" in containerfile_text
+
+
+def test_build_project_image_uses_apt_for_debian_and_ubuntu(tmp_path) -> None:
+    for base_os in ("debian", "ubuntu"):
+        podman = MagicMock()
+        image.build_project_image(
+            podman,
+            "ocbox/base:latest",
+            "ocbox/project-x:latest",
+            ["git"],
+            [],
+            tmp_path,
+            base_os,
+        )
+        containerfile_text = podman.build.call_args[0][0]
+        assert "apt-get install" in containerfile_text
+        assert "dnf install" not in containerfile_text
+
+
+def test_build_project_image_uses_dnf_for_rocky(tmp_path) -> None:
+    podman = MagicMock()
+    image.build_project_image(
+        podman, "ocbox/base:latest", "ocbox/project-x:latest", ["git"], [], tmp_path, "rocky"
+    )
+    containerfile_text = podman.build.call_args[0][0]
+    assert "dnf install -y git" in containerfile_text
+    assert "apt-get" not in containerfile_text

@@ -13,36 +13,56 @@ from ocbox.podman_client import PodmanClient
 
 CONTAINERFILE_HASH_LABEL = "ocbox.containerfile_hash"
 
+# Each entry names the packaged Containerfile variant under data/distros/
+# and the package manager `build_project_image` uses to install a project's
+# requested extra packages on top of it.
+DISTROS = {
+    "debian": "apt",
+    "ubuntu": "apt",
+    "rocky": "dnf",
+}
+DEFAULT_BASE_OS = "debian"
+
 
 def data_dir() -> Path:
     return Path(str(importlib.resources.files("ocbox.data")))
 
 
-def containerfile_fingerprint() -> str:
-    """Hashes the packaged Containerfile + relay.py + entrypoint.sh together.
+def _distro_containerfile_path(base_os: str) -> Path:
+    if base_os not in DISTROS:
+        raise ValueError(
+            f"Unknown BASE_OS {base_os!r}; supported: {', '.join(sorted(DISTROS))}"
+        )
+    return data_dir() / "distros" / base_os / "Containerfile"
+
+
+def containerfile_fingerprint(base_os: str = DEFAULT_BASE_OS) -> str:
+    """Hashes the selected distro's packaged Containerfile + relay.py +
+    entrypoint.sh together.
 
     Used to detect that an ocbox upgrade shipped a changed base image
-    definition, so a cached `ocbox/base:latest` from a previous version
-    doesn't get used forever - see ensure_base_image().
+    definition (or that BASE_OS itself changed), so a cached
+    `ocbox/base:latest` from a previous version/distro doesn't get used
+    forever - see ensure_base_image().
     """
-    payload = b"".join(
-        (data_dir() / name).read_bytes()
-        for name in ("Containerfile", "relay.py", "entrypoint.sh")
-    )
+    payload = _distro_containerfile_path(base_os).read_bytes()
+    payload += (data_dir() / "relay.py").read_bytes()
+    payload += (data_dir() / "entrypoint.sh").read_bytes()
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
-def ensure_base_image(podman: PodmanClient, tag: str) -> None:
-    """Builds the base image (Debian + uv + OpenCode + relay.py) if not
-    already cached, or if the packaged Containerfile/relay.py/entrypoint.sh
-    have changed since the cached image was built (tracked via a
-    content-hash label), so an ocbox upgrade doesn't silently keep using a
-    stale base image forever.
+def ensure_base_image(podman: PodmanClient, tag: str, base_os: str = DEFAULT_BASE_OS) -> None:
+    """Builds the base image (chosen distro + uv + OpenCode + relay.py) if
+    not already cached, or if the packaged Containerfile/relay.py/
+    entrypoint.sh have changed since the cached image was built - including
+    BASE_OS itself changing - (tracked via a content-hash label), so an
+    ocbox upgrade or a distro switch doesn't silently keep using a stale
+    base image forever.
     """
-    fingerprint = containerfile_fingerprint()
+    fingerprint = containerfile_fingerprint(base_os)
     if podman.image_exists(tag) and podman.image_label(tag, CONTAINERFILE_HASH_LABEL) == fingerprint:
         return
-    containerfile = (data_dir() / "Containerfile").read_text()
+    containerfile = _distro_containerfile_path(base_os).read_text()
     containerfile += f"\nLABEL {CONTAINERFILE_HASH_LABEL}={fingerprint}\n"
     podman.build(containerfile, tag, context_dir=str(data_dir()))
 
@@ -68,6 +88,17 @@ def image_exists(podman: PodmanClient, tag: str) -> bool:
     return podman.image_exists(tag)
 
 
+def _system_package_install_line(base_os: str, pkgs: list[str]) -> str:
+    pkg_args = " ".join(shlex.quote(p) for p in pkgs)
+    package_manager = DISTROS.get(base_os, "apt")
+    if package_manager == "dnf":
+        return f"RUN dnf install -y {pkg_args} && dnf clean all"
+    return (
+        "RUN apt-get update && apt-get install -y --no-install-recommends "
+        f"{pkg_args} && rm -rf /var/lib/apt/lists/*"
+    )
+
+
 def build_project_image(
     podman: PodmanClient,
     base_tag: str,
@@ -75,8 +106,13 @@ def build_project_image(
     apt_pkgs: list[str],
     uv_pkgs: list[str],
     empty_context: Path,
+    base_os: str = DEFAULT_BASE_OS,
 ) -> None:
     """Layers the requested extra packages onto base_tag, tagged as project_tag.
+
+    The extra "apt" packages are installed with the package manager that
+    matches `base_os` (apt on Debian/Ubuntu, dnf on Rocky) - package names
+    still need to be valid for whichever distro is actually selected.
 
     Runs with normal (non-isolated) networking - this is the only phase of
     ocbox's lifecycle that touches the open internet, and it never overlaps
@@ -86,11 +122,7 @@ def build_project_image(
     """
     lines = [f"FROM {base_tag}"]
     if apt_pkgs:
-        pkg_args = " ".join(shlex.quote(p) for p in apt_pkgs)
-        lines.append(
-            "RUN apt-get update && apt-get install -y --no-install-recommends "
-            f"{pkg_args} && rm -rf /var/lib/apt/lists/*"
-        )
+        lines.append(_system_package_install_line(base_os, apt_pkgs))
     if uv_pkgs:
         pkg_args = " ".join(shlex.quote(p) for p in uv_pkgs)
         lines.append(f"RUN uv pip install --system {pkg_args}")
