@@ -11,7 +11,6 @@ from pathlib import Path
 
 from ocbox.podman_client import PodmanClient
 
-
 CONTAINERFILE_HASH_LABEL = "ocbox.containerfile_hash"
 
 

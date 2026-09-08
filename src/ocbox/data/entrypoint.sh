@@ -5,8 +5,8 @@
 # from the host at /run/ocbox.
 #
 # Two modes, chosen by OCBOX_MODE:
-#   web (default): starts OpenCode's web UI, waits for it to actually be
-#     listening, then brings up the second (web-ingress) relay so the host
+#   web (default): starts OpenCode's web server, waits for it to actually
+#     be listening, then brings up the second (web-ingress) relay so the host
 #     can reach it. Runs detached from any terminal.
 #   tui: execs OpenCode's interactive terminal UI directly, attached to
 #     whatever terminal `podman run -it` was given. No web relay, no auth
@@ -49,21 +49,35 @@ python3 /usr/local/lib/ocbox/relay.py serve-tcp "127.0.0.1:${CONTAINER_LLM_PORT}
 wait_for_port "$CONTAINER_LLM_PORT" 50 "LLM relay"
 
 if [ "$MODE" = "tui" ]; then
-    # NOTE: assumes bare `opencode` (no subcommand) launches the interactive
-    # TUI, mirroring how e.g. `claude` launches its own REPL with no
-    # subcommand - unverified against OpenCode's real CLI, see the project's
-    # open questions.
+    # Verified against opencode 1.18.29: `opencode --help` lists
+    # `opencode [project]  start opencode tui  [default]`, so bare `opencode`
+    # with no subcommand is indeed the interactive TUI.
     exec opencode
 fi
 
 CONTAINER_WEB_PORT="${OCBOX_CONTAINER_WEB_PORT:?OCBOX_CONTAINER_WEB_PORT not set}"
 
-opencode web --hostname 127.0.0.1 --port "${CONTAINER_WEB_PORT}" &
+# Basic Auth is the only thing gating the forwarded web UI, so an empty
+# password would quietly expose it to anything that can reach the host port.
+# OpenCode merely warns about that, on the stdout we drop just below - so
+# check it here instead, where it can still fail closed.
+: "${OPENCODE_SERVER_PASSWORD:?refusing to start web mode without a password}"
+
+# `serve`, not `web`: both serve the identical UI (verified byte-for-byte),
+# but `opencode web` also spawns xdg-open, which doesn't exist in this image -
+# it dumped a stack trace into the user's terminal on every run. ocbox prints
+# the URL instead and lets the user open it themselves.
+#
+# stdout is dropped because its only content is a banner advertising
+# http://127.0.0.1:${CONTAINER_WEB_PORT} - the *container-internal* port,
+# unreachable from the host and contradicting the URL ocbox prints. stderr
+# stays attached so genuine failures still surface.
+opencode serve --hostname 127.0.0.1 --port "${CONTAINER_WEB_PORT}" >/dev/null &
 OPENCODE_PID=$!
 
-wait_for_port "$CONTAINER_WEB_PORT" 150 "opencode web"
+wait_for_port "$CONTAINER_WEB_PORT" 150 "opencode serve"
 
-# Web ingress: /run/ocbox/web.sock -> (host relay) -> browser, this side -> opencode web.
+# Web ingress: /run/ocbox/web.sock -> (host relay) -> browser, this side -> opencode serve.
 python3 /usr/local/lib/ocbox/relay.py serve-unix /run/ocbox/web.sock \
     --connect-tcp "127.0.0.1:${CONTAINER_WEB_PORT}" &
 

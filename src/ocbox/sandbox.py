@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import signal
 import sys
-import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -154,7 +153,6 @@ def run(
     agents_json: Path | None = None,
     skills_dir: Path | None = None,
     host_web_port: int | None = None,
-    open_browser: bool = True,
 ) -> int:
     podman = PodmanClient()
     slug = project.project_slug(cwd)
@@ -231,7 +229,7 @@ def run(
 
     container_proc = launch(plan, podman)
 
-    def _on_sigint(signum, frame) -> None:  # noqa: ANN001 - signal handler signature
+    def _on_sigint(signum, frame) -> None:  # untyped args: signal handler signature
         podman.stop(container_name)
 
     if mode == "tui":
@@ -268,8 +266,6 @@ def run(
 
         url = auth.build_web_url(resolved_host_web_port)
         print(auth.format_connect_banner(url, auth.DEFAULT_USERNAME, token))
-        if open_browser:
-            webbrowser.open(url)
 
         return container_proc.wait()
     finally:

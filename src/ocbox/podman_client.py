@@ -39,7 +39,7 @@ class PodmanClient:
 
     def image_exists(self, tag: str) -> bool:
         result = subprocess.run(
-            [self.binary, "image", "exists", tag], capture_output=True, text=True
+            [self.binary, "image", "exists", tag], capture_output=True, text=True, check=False
         )
         return result.returncode == 0
 
@@ -56,6 +56,7 @@ class PodmanClient:
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode != 0:
             return None
@@ -90,4 +91,5 @@ class PodmanClient:
             [self.binary, "stop", "-t", str(timeout), name],
             capture_output=True,
             text=True,
+            check=False,
         )

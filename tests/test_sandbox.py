@@ -12,19 +12,19 @@ from ocbox.sandbox import (
 
 
 def _plan(**overrides) -> RunPlan:
-    defaults = dict(
-        image_tag="ocbox/project-test:latest",
-        workspace=Path("/home/user/myproj"),
-        run_dir=Path("/run/user/1000/ocbox/myproj"),
-        env_file=Path("/run/user/1000/ocbox/myproj/env"),
-        opencode_config=Path("/run/user/1000/ocbox/myproj/opencode.json"),
-        agents_json=Path("/pkg/data/agents.json"),
-        skills_dir=Path("/pkg/data/skills"),
-        data_volume="ocbox-home-myproj",
-        container_name="ocbox-myproj",
-        container_web_port=4096,
-        container_llm_port=8081,
-    )
+    defaults = {
+        "image_tag": "ocbox/project-test:latest",
+        "workspace": Path("/home/user/myproj"),
+        "run_dir": Path("/run/user/1000/ocbox/myproj"),
+        "env_file": Path("/run/user/1000/ocbox/myproj/env"),
+        "opencode_config": Path("/run/user/1000/ocbox/myproj/opencode.json"),
+        "agents_json": Path("/pkg/data/agents.json"),
+        "skills_dir": Path("/pkg/data/skills"),
+        "data_volume": "ocbox-home-myproj",
+        "container_name": "ocbox-myproj",
+        "container_web_port": 4096,
+        "container_llm_port": 8081,
+    }
     defaults.update(overrides)
     return RunPlan(**defaults)
 

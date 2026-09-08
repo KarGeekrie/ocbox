@@ -52,7 +52,7 @@ def _load_module_from_path(path: Path) -> types.ModuleType:
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
-    except Exception as exc:  # noqa: BLE001 - surfaced to the user as a ConfigError
+    except Exception as exc:  # broad on purpose - surfaced to the user as a ConfigError
         raise ConfigError(f"Error executing {path}: {exc}") from exc
     return module
 

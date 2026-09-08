@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stand-in for `opencode web`, used only by ocbox's real-Podman integration
+"""Stand-in for `opencode serve`, used only by ocbox's real-Podman integration
 test (see ../test_end_to_end.py). Mimics enough of OpenCode's documented
 surface - `--hostname`/`--port` flags, HTTP Basic Auth gated by
 OPENCODE_SERVER_USERNAME/OPENCODE_SERVER_PASSWORD - to prove ocbox's
@@ -34,7 +34,7 @@ def _check_auth(handler: BaseHTTPRequestHandler) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args) -> None:  # noqa: ANN002 - stdlib signature
+    def log_message(self, *args) -> None:  # untyped args: stdlib signature
         pass
 
     def _unauthorized(self) -> None:
@@ -42,7 +42,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("WWW-Authenticate", 'Basic realm="opencode"')
         self.end_headers()
 
-    def do_GET(self) -> None:  # noqa: N802 - stdlib handler method name
+    def do_GET(self) -> None:  # non-PEP8 name: stdlib handler method
         if not _check_auth(self):
             self._unauthorized()
             return
