@@ -229,7 +229,7 @@ def run(
 
     container_proc = launch(plan, podman)
 
-    def _on_sigint(signum, frame) -> None:  # noqa: ANN001 - signal handler signature
+    def _on_sigint(signum, frame) -> None:  # untyped args: signal handler signature
         podman.stop(container_name)
 
     if mode == "tui":

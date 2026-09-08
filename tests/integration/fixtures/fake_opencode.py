@@ -34,7 +34,7 @@ def _check_auth(handler: BaseHTTPRequestHandler) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args) -> None:  # noqa: ANN002 - stdlib signature
+    def log_message(self, *args) -> None:  # untyped args: stdlib signature
         pass
 
     def _unauthorized(self) -> None:
@@ -42,7 +42,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("WWW-Authenticate", 'Basic realm="opencode"')
         self.end_headers()
 
-    def do_GET(self) -> None:  # noqa: N802 - stdlib handler method name
+    def do_GET(self) -> None:  # non-PEP8 name: stdlib handler method
         if not _check_auth(self):
             self._unauthorized()
             return

@@ -13,9 +13,11 @@ from ocbox.preflight import (
 
 
 def test_check_podman_installed_missing() -> None:
-    with patch("shutil.which", return_value=None):
-        with pytest.raises(PreflightError, match="not installed"):
-            check_podman_installed()
+    with (
+        patch("shutil.which", return_value=None),
+        pytest.raises(PreflightError, match="not installed"),
+    ):
+        check_podman_installed()
 
 
 def test_check_podman_installed_present() -> None:
@@ -36,11 +38,11 @@ def test_check_rootless_true() -> None:
 
 def test_check_rootless_false() -> None:
     payload = json.dumps({"host": {"security": {"rootless": False}}})
-    with patch(
-        "subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=payload)
+    with (
+        patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=payload)),
+        pytest.raises(PreflightError, match="rootless"),
     ):
-        with pytest.raises(PreflightError, match="rootless"):
-            check_rootless()
+        check_rootless()
 
 
 def test_check_subuid_subgid_missing(tmp_path) -> None:

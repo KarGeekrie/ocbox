@@ -17,7 +17,7 @@ from ocbox.config import Config
 
 
 def _cfg(**overrides) -> Config:
-    defaults = dict(llm_host="127.0.0.1", llm_port=11434)
+    defaults = {"llm_host": "127.0.0.1", "llm_port": 11434}
     defaults.update(overrides)
     return Config(**defaults)
 

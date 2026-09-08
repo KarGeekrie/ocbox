@@ -46,7 +46,7 @@ def test_ensure_base_image_builds_if_missing() -> None:
     podman.image_exists.return_value = False
     image.ensure_base_image(podman, "ocbox/base:latest")
     podman.build.assert_called_once()
-    args, kwargs = podman.build.call_args
+    args, _kwargs = podman.build.call_args
     assert args[1] == "ocbox/base:latest"
     assert image.CONTAINERFILE_HASH_LABEL in args[0]
 

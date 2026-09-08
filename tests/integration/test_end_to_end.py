@@ -44,10 +44,10 @@ IMAGE_TAG = "ocbox-integration-test:latest"
 
 
 class _StubLLMHandler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args) -> None:  # noqa: ANN002 - stdlib signature
+    def log_message(self, *args) -> None:  # untyped args: stdlib signature
         pass
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:  # non-PEP8 name: stdlib handler method
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
