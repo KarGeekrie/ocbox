@@ -11,6 +11,10 @@
 #   tui: execs OpenCode's interactive terminal UI directly, attached to
 #     whatever terminal `podman run -it` was given. No web relay, no auth
 #     token - nothing is exposed to the host network at all in this mode.
+#
+# Any arguments this script receives are OpenCode's own, forwarded verbatim
+# from `ocbox ... -- <args>`; ocbox rejects --port/--hostname before they get
+# here, since those would detach OpenCode from the relay.
 set -eu
 
 # Polls 127.0.0.1:<port> until something is listening, or gives up after
@@ -52,7 +56,7 @@ if [ "$MODE" = "tui" ]; then
     # Verified against opencode 1.18.29: `opencode --help` lists
     # `opencode [project]  start opencode tui  [default]`, so bare `opencode`
     # with no subcommand is indeed the interactive TUI.
-    exec opencode
+    exec opencode "$@"
 fi
 
 CONTAINER_WEB_PORT="${OCBOX_CONTAINER_WEB_PORT:?OCBOX_CONTAINER_WEB_PORT not set}"
@@ -72,7 +76,7 @@ CONTAINER_WEB_PORT="${OCBOX_CONTAINER_WEB_PORT:?OCBOX_CONTAINER_WEB_PORT not set
 # http://127.0.0.1:${CONTAINER_WEB_PORT} - the *container-internal* port,
 # unreachable from the host and contradicting the URL ocbox prints. stderr
 # stays attached so genuine failures still surface.
-opencode serve --hostname 127.0.0.1 --port "${CONTAINER_WEB_PORT}" >/dev/null &
+opencode serve --hostname 127.0.0.1 --port "${CONTAINER_WEB_PORT}" "$@" >/dev/null &
 OPENCODE_PID=$!
 
 wait_for_port "$CONTAINER_WEB_PORT" 150 "opencode serve"

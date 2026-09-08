@@ -1,5 +1,6 @@
 """Exercises data/relay.py directly via asyncio - no podman, no subprocess."""
 
+import argparse
 import asyncio
 import importlib.util
 import sys
@@ -100,7 +101,5 @@ def test_parse_host_port():
 
 
 def test_parse_host_port_rejects_missing_host():
-    import argparse
-
     with pytest.raises(argparse.ArgumentTypeError):
         relay._parse_host_port(":8080")

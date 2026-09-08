@@ -60,7 +60,9 @@ def ensure_base_image(podman: PodmanClient, tag: str, base_os: str = DEFAULT_BAS
     base image forever.
     """
     fingerprint = containerfile_fingerprint(base_os)
-    if podman.image_exists(tag) and podman.image_label(tag, CONTAINERFILE_HASH_LABEL) == fingerprint:
+    if podman.image_exists(tag) and (
+        podman.image_label(tag, CONTAINERFILE_HASH_LABEL) == fingerprint
+    ):
         return
     containerfile = _distro_containerfile_path(base_os).read_text()
     containerfile += f"\nLABEL {CONTAINERFILE_HASH_LABEL}={fingerprint}\n"

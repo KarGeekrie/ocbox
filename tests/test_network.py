@@ -1,4 +1,5 @@
 import socket
+import subprocess
 import time
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -64,8 +65,6 @@ def test_teardown_terminates_relay_processes() -> None:
 
 
 def test_teardown_kills_relay_if_terminate_times_out() -> None:
-    import subprocess
-
     llm_relay = _fake_proc()
     llm_relay.wait.side_effect = [subprocess.TimeoutExpired("relay.py", 5), 0]
     bridges = network.NetworkBridges(llm_relay=llm_relay, llm_sock=Path("/nonexistent"))
@@ -83,7 +82,9 @@ def test_pick_free_port_returns_a_bindable_port() -> None:
 
 def test_wait_for_unix_socket_times_out(tmp_path: Path) -> None:
     with pytest.raises(network.NetworkError, match="Timed out"):
-        network.wait_for_unix_socket(tmp_path / "never-created.sock", timeout=0.3, poll_interval=0.1)
+        network.wait_for_unix_socket(
+            tmp_path / "never-created.sock", timeout=0.3, poll_interval=0.1
+        )
 
 
 def test_wait_for_unix_socket_succeeds_once_listening(tmp_path: Path) -> None:
