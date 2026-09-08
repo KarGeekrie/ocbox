@@ -1,15 +1,35 @@
 # Default skills
 
-Put one subdirectory per skill here (e.g. `skills/my-skill/`) with whatever
-files OpenCode's skill format expects. This directory is bind-mounted
-read-only into every sandbox alongside `agents.json`, so it's a good place
-for skills you want available in every project without reconfiguring
-OpenCode each time.
+Put one subdirectory per skill here, each containing a `SKILL.md`:
 
-The exact directory/file layout OpenCode expects for custom skills hasn't
-been verified against its docs yet - see the project plan's open question
-#7. Until then, treat this as a template: ocbox mounts whatever is here
-as-is, it doesn't interpret or validate skill contents.
+```
+skills/my-skill/SKILL.md
+```
+
+`SKILL.md` needs YAML frontmatter with `name` and `description`:
+
+```markdown
+---
+name: my-skill
+description: What it does and when to use it - front-load the trigger words.
+---
+
+Body of the skill, in markdown.
+```
+
+`name` is lowercase-hyphenated, up to 64 characters, and matches the folder
+name. `description` is effectively required: OpenCode filters out skills
+without one and never surfaces them to the model.
+
+This directory is bind-mounted read-only into every sandbox at
+`/etc/ocbox/skills`, and ocbox registers it via `skills.paths` in the
+`opencode.json` it generates, so skills you drop here are available in every
+project without reconfiguring OpenCode each time.
+
+Layout verified against opencode 1.18.29: a probe skill placed here shows up
+in `opencode debug skill` with its `location` pointing at the mounted path.
+That command is the way to check your own - a skill OpenCode doesn't like is
+simply absent from the list rather than reported as an error.
 
 Project-specific skills should live in the project's own OpenCode config
 inside the mounted workspace instead of here.

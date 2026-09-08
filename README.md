@@ -11,12 +11,12 @@ UI** in the invoking terminal. Same sandboxing either way:
   into the sandbox (read-write). No other host path is visible from inside.
 - **Network**: the container gets `--network=none` - no network device at
   all except loopback. The only thing it can reach is a local LLM server you
-  configure (see "How the isolation works" below). In web mode, a pair of
+  configure (see "How the isolation works" below). In **web UI** mode, a pair of
   relay processes ocbox starts on the host is the only thing that can reach
   back into the container, exposing the UI to your browser; in `--tui` mode
   nothing is exposed to the host network at all - you're attached directly
   to the container's terminal.
-- **Auth**: web mode generates a fresh token on every run, printed to your
+- **Auth**: **web UI** mode generates a fresh token on every run, printed to your
   terminal, that gates access to the forwarded web UI. `--tui` mode needs no
   token - there's no network-exposed UI to protect.
 
@@ -164,8 +164,25 @@ Useful flags:
 `src/ocbox/data/agents.json` and `src/ocbox/data/skills/` are templates you
 can fill in once with the skills/agents you want available in every sandbox,
 instead of reconfiguring OpenCode per project. Both are mounted read-only
-into every container. Point `--agents-json`/`--skills-dir` at your own files
-to override them per invocation.
+into every container, and ocbox wires them into the `opencode.json` it
+generates. Point `--agents-json`/`--skills-dir` at your own files to override
+them per invocation.
+
+Both follow OpenCode's own schema (<https://opencode.ai/config.json>):
+
+- **Skills**: one folder per skill, each holding a `SKILL.md` with `name` and
+  `description` frontmatter. ocbox registers the mounted folder through
+  `skills.paths`. See `src/ocbox/data/skills/README.md`.
+- **Agents**: `agents.json` carries an `agent` object *keyed by agent name*
+  (not a list), each value an AgentConfig - `description`, `mode`
+  (`primary`/`subagent`/`all`), `model`, `prompt`, `tools`, and so on. An
+  optional `skills.paths` list there adds folders on top of ocbox's own mount.
+
+Check either with `opencode debug config` (what config survived) and
+`opencode debug skill` (which skills were discovered) from inside a sandbox.
+OpenCode ignores config keys it doesn't recognise without complaining, so a
+wrong name shows up as a feature that quietly does nothing rather than an
+error.
 
 ## How the isolation works
 
@@ -187,24 +204,31 @@ two channels through Unix sockets bind-mounted from the host:
 No arbitrary destination is ever reachable from inside the sandbox, and no
 container-internal port is ever published directly to the host.
 
-## Known open questions
+## Verified against real OpenCode
 
-A few details of OpenCode's actual CLI/config surface (exact `opencode.json`
-discovery path, the real skills/agents config schema, etc.) are still
-ocbox's best-effort assumptions and haven't been verified against OpenCode's
-live documentation. See the docstrings in `sandbox.py`, `image.py`, and
-`data/entrypoint.sh`, and the project's plan file, for what to double-check
-before relying on this in production.
+The details of OpenCode's CLI/config surface that ocbox depends on were
+originally best-effort guesses. All four have since been checked against
+opencode 1.18.29 and its published schema:
 
-Two of these have since been **verified** against opencode 1.18.29 and are
-no longer open:
+- **`opencode.json` discovery**: `OPENCODE_CONFIG=<path>` is honoured - the
+  config ocbox mounts there shows up in `opencode debug config`.
+- **Skills/agents schema**: `skills` is an object (`paths`/`urls`), and
+  `agent` is an object keyed by agent name - neither is a list. Skills are
+  `<dir>/<name>/SKILL.md` with `name`/`description` frontmatter. Earlier
+  versions of ocbox emitted `skillsDir` and a list-valued `agents`, neither
+  of which exists; OpenCode dropped both silently, so the mounted skills and
+  agents never reached it.
+- **`opencode web` auto-opens a browser**: it spawns `xdg-open`, absent from
+  the sandbox image, for a container-internal URL that is meaningless on the
+  host. ocbox runs `opencode serve` instead - headless, byte-for-byte the
+  same UI - and prints the URL for you to open.
+- **Bare `opencode` is the TUI**: `opencode --help` lists it as the default
+  command, which is what `--tui` relies on.
 
-- `opencode web` does auto-open a browser - it spawns `xdg-open`, which
-  doesn't exist in the sandbox image, so it dumped a stack trace into the
-  terminal on every run. ocbox now runs `opencode serve` (headless, serves
-  the byte-for-byte identical UI) and just prints the URL for you to open.
-- Bare `opencode` with no subcommand really is the interactive TUI
-  (`opencode --help` lists it as the default command), as `--tui` assumes.
+Worth knowing when changing any of this: OpenCode ignores config keys it
+doesn't recognise instead of rejecting them, so a wrong key name disables a
+feature with nothing in the output to say so. `opencode debug config` prints
+what actually survived, and `opencode debug skill` lists what was discovered.
 
 ## Verified against real rootless Podman
 

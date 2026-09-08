@@ -108,12 +108,16 @@ exactly how the integration tests were validated during initial development
 - `data/entrypoint.sh` is POSIX `sh`, not bash - keep it that way (it runs
   inside a minimal container image). Test changes to it via the integration
   suite, not just `sh -n`.
-- Several fields of OpenCode's real CLI/config surface are **unverified
-  assumptions** (exact `opencode.json` discovery path, whether bare
-  `opencode` launches the TUI, the real skills/agents schema, etc.) - see
-  `README.md`'s "Known open questions" section. Don't remove those caveats
-  without actually verifying the behavior against OpenCode's real docs or a
-  real run.
+- The parts of OpenCode's CLI/config surface that ocbox depends on have been
+  verified against opencode 1.18.29 - see `README.md`'s "Verified against
+  real OpenCode" section for what was checked and how. Two things to know
+  before changing any of it: OpenCode's published schema is at
+  <https://opencode.ai/config.json>, and it **ignores config keys it doesn't
+  recognise** rather than rejecting them, so a wrong key name silently
+  disables a feature instead of failing. Check with `opencode debug config`
+  (what config survived) and `opencode debug skill` (what was discovered)
+  from inside a sandbox, not by reading the code. If you introduce a new
+  assumption you haven't checked that way, mark it and say so.
 
 ## Git / PR conventions
 

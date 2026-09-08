@@ -119,10 +119,17 @@ def launch(plan: RunPlan, podman: PodmanClient):
 def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dict:
     """Builds the single opencode.json ocbox mounts into every sandbox.
 
-    Field names for the local-LLM provider, the skills directory, and the
-    agents/skills passthrough are ocbox's best guess at OpenCode's config
-    schema - verify against OpenCode's real docs before relying on this (see
-    the project plan's open questions #1 and #7).
+    Key names are verified against OpenCode's published schema
+    (https://opencode.ai/config.json, checked at opencode 1.18.29): `provider`
+    keyed by provider name, `skills.paths` for extra skill folders, and
+    `agent` keyed by agent name.
+
+    Getting a name wrong here fails silently rather than loudly: the schema
+    declares additionalProperties=false, but the runtime just drops what it
+    doesn't recognise. Earlier guesses at `skillsDir` and a list-valued
+    `agents` did exactly that, leaving the mounted skills/agents invisible to
+    OpenCode with nothing in the output to say so - so re-check any change
+    here against `opencode debug config`, which prints what actually survived.
     """
     cfg: dict = {
         "provider": {
@@ -131,13 +138,18 @@ def _generate_opencode_config(container_llm_port: int, agents_path: Path) -> dic
                 "options": {"baseURL": f"http://127.0.0.1:{container_llm_port}/v1"},
             }
         },
-        "skillsDir": SKILLS_DIR_MOUNT,
+        "skills": {"paths": [SKILLS_DIR_MOUNT]},
     }
     if agents_path.exists():
         agents_data = json.loads(agents_path.read_text())
-        for key in ("agents", "skills"):
-            if key in agents_data:
-                cfg[key] = agents_data[key]
+        agent = agents_data.get("agent")
+        if isinstance(agent, dict) and agent:
+            cfg["agent"] = agent
+        extra_skills = agents_data.get("skills")
+        if isinstance(extra_skills, dict):
+            for path in extra_skills.get("paths", []):
+                if path not in cfg["skills"]["paths"]:
+                    cfg["skills"]["paths"].append(path)
     return cfg
 
 

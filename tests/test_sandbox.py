@@ -90,22 +90,63 @@ def test_argv_includes_resource_limits_when_set() -> None:
 
 def test_generate_opencode_config_points_at_container_llm_port(tmp_path) -> None:
     agents_path = tmp_path / "agents.json"
-    agents_path.write_text(json.dumps({"agents": [{"name": "default"}], "skills": []}))
+    agents_path.write_text(json.dumps({"agent": {"default": {"mode": "primary"}}}))
 
     cfg = _generate_opencode_config(8081, agents_path)
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
-    assert cfg["agents"] == [{"name": "default"}]
+    assert cfg["agent"] == {"default": {"mode": "primary"}}
 
 
 def test_generate_opencode_config_handles_missing_agents_file(tmp_path) -> None:
     cfg = _generate_opencode_config(8081, tmp_path / "does-not-exist.json")
-    assert "agents" not in cfg
+    assert "agent" not in cfg
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 
 
 def test_generate_opencode_config_references_mounted_skills_dir(tmp_path) -> None:
     cfg = _generate_opencode_config(8081, tmp_path / "does-not-exist.json")
-    assert cfg["skillsDir"] == SKILLS_DIR_MOUNT
+    assert cfg["skills"]["paths"] == [SKILLS_DIR_MOUNT]
+
+
+def test_generate_opencode_config_uses_only_real_schema_keys(tmp_path) -> None:
+    """OpenCode's schema is additionalProperties=false but its runtime drops
+    unknown keys silently, so a typo here disables a feature with no error -
+    which is exactly how `skillsDir`/`agents` went unnoticed."""
+    agents_path = tmp_path / "agents.json"
+    agents_path.write_text(json.dumps({"agent": {"a": {}}, "skills": {"paths": []}}))
+
+    cfg = _generate_opencode_config(8081, agents_path)
+    assert set(cfg) <= {"provider", "skills", "agent"}
+    assert "skillsDir" not in cfg
+    assert "agents" not in cfg
+
+
+def test_generate_opencode_config_appends_extra_skill_paths(tmp_path) -> None:
+    agents_path = tmp_path / "agents.json"
+    agents_path.write_text(json.dumps({"skills": {"paths": ["/extra/skills"]}}))
+
+    cfg = _generate_opencode_config(8081, agents_path)
+    assert cfg["skills"]["paths"] == [SKILLS_DIR_MOUNT, "/extra/skills"]
+
+
+def test_shipped_agents_template_feeds_through_cleanly() -> None:
+    """Guards the packaged template itself: a future edit that reintroduces a
+    made-up key would otherwise only show up as a silently disabled feature."""
+    from ocbox.image import data_dir
+
+    cfg = _generate_opencode_config(8081, data_dir() / "agents.json")
+    assert set(cfg) <= {"provider", "skills", "agent"}
+    assert cfg["skills"]["paths"] == [SKILLS_DIR_MOUNT]
+
+
+def test_generate_opencode_config_ignores_empty_agent_object(tmp_path) -> None:
+    """The shipped agents.json template has an empty `agent` - it shouldn't
+    plant a useless empty key in the mounted config."""
+    agents_path = tmp_path / "agents.json"
+    agents_path.write_text(json.dumps({"agent": {}, "skills": {"paths": []}}))
+
+    cfg = _generate_opencode_config(8081, agents_path)
+    assert "agent" not in cfg
 
 
 def test_argv_web_mode_omits_it_flag() -> None:
