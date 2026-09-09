@@ -73,6 +73,10 @@ Install the package:
 pip install -e .          # from a checkout, until this is published
 ```
 
+`opencode-config/` at the repo root holds what ocbox mounts into every
+sandbox - default agents, skills, and model list. Customize it right there in
+your clone; see "Default skills & agents" below.
+
 Create `~/.config/ocbox/conf.py`:
 
 ```python
@@ -115,7 +119,9 @@ against real rootless Podman" below.
 it serves. Without that, it has an endpoint it can reach and nothing to
 select - the sandbox comes up but no model is usable.
 
-Create `~/.config/ocbox/opencode.jsonc`:
+Edit `opencode-config/opencode.jsonc` in your clone (or create
+`~/.config/ocbox/opencode.jsonc`, which takes priority when present - useful
+if you'd rather keep it out of the repo):
 
 ```jsonc
 {
@@ -242,11 +248,14 @@ Useful flags:
 
 ## Default skills & agents
 
-`src/ocbox/data/agents/` and `src/ocbox/data/skills/` hold the agents and
-skills you want available in every sandbox, instead of reconfiguring OpenCode
-per project. Both are mounted read-only into every container. Point
-`--agents-dir`/`--skills-dir` at your own directories to override them per
-invocation.
+`opencode-config/` at the repo root - not buried under `src/` - holds
+everything you want available in every sandbox: `agents/` and `skills/`
+instead of reconfiguring OpenCode per project, plus the `opencode.jsonc`
+described above (`~/.config/ocbox/opencode.jsonc` still takes priority over
+it when present). It's meant to be edited directly in your clone: `git clone`,
+drop in your own agents/skills and models, `ocbox` picks them up from there -
+no separate install step. Point `--agents-dir`/`--skills-dir` at other
+directories to override per invocation instead.
 
 Both are found because of *where* they are mounted - OpenCode's own global
 config directory - rather than through any config key, so the `opencode.json`
@@ -255,12 +264,12 @@ ocbox generates holds nothing but the provider endpoint:
 - **Agents**: one `<name>.md` per agent, with `description`/`mode`
   frontmatter and the body as its prompt. Mounted at
   `~/.config/opencode/agents`, where OpenCode looks for global agents. See
-  `src/ocbox/data/agents/README.md`.
+  `opencode-config/agents/README.md`.
 - **Skills**: one folder per skill, each holding a `SKILL.md` with required
   `name` and `description` frontmatter. Mounted at
   `~/.config/opencode/skills`, the documented location for global skills, so
   the same mechanism as agents - no config key involved. See
-  `src/ocbox/data/skills/README.md`.
+  `opencode-config/skills/README.md`.
 
 ocbox ships four agents: `chat` (discussion only - editing *and* bash denied,
 since denying edits alone still leaves `echo x > file`), `review` (finds bugs;

@@ -28,6 +28,25 @@ def data_dir() -> Path:
     return Path(str(importlib.resources.files("ocbox.data")))
 
 
+def repo_config_dir() -> Path:
+    """opencode-config/ at the repo root: agents/skills/opencode.jsonc meant to
+    be seen and edited directly in a checkout, unlike data_dir()'s contents
+    (relay.py, entrypoint.sh, per-distro Containerfiles), which are internal.
+
+    Only resolvable for the (currently only supported - see README "Setup")
+    editable-install-from-checkout workflow: three parents up from this file
+    (src/ocbox/image.py) is the repo root.
+    """
+    path = Path(__file__).resolve().parents[2] / "opencode-config"
+    if not path.is_dir():
+        raise FileNotFoundError(
+            f"Expected {path} (agents/skills/opencode.jsonc) next to a checkout "
+            "of ocbox - install with `pip install -e .` from a clone, not a "
+            "built wheel."
+        )
+    return path
+
+
 def _distro_containerfile_path(base_os: str) -> Path:
     if base_os not in DISTROS:
         raise ValueError(

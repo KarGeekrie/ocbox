@@ -11,7 +11,7 @@ directory - either through OpenCode's web UI (default) or its terminal UI
 overview; read it before making changes, it explains the isolation design
 in depth.
 
-Don't confuse this repo-level `AGENTS.md` with `src/ocbox/data/agents/` -
+Don't confuse this repo-level `AGENTS.md` with `opencode-config/agents/` -
 that directory holds *runtime* agent definitions ocbox mounts into the
 sandboxes it creates, for OpenCode itself. They're unrelated.
 

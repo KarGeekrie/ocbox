@@ -35,6 +35,27 @@ def test_containerfile_fingerprint_is_deterministic() -> None:
     assert image.containerfile_fingerprint() == image.containerfile_fingerprint()
 
 
+def test_repo_config_dir_points_at_the_repo_root_directory() -> None:
+    """Unlike data_dir()'s internal payload, opencode-config/ sits next to
+    pyproject.toml so it's visible/editable straight in a checkout."""
+    path = image.repo_config_dir()
+    assert path.name == "opencode-config"
+    assert (path.parent / "pyproject.toml").is_file()
+
+
+def test_repo_config_dir_holds_agents_skills_and_the_default_jsonc() -> None:
+    path = image.repo_config_dir()
+    assert (path / "agents").is_dir()
+    assert (path / "skills").is_dir()
+    assert (path / "opencode.jsonc").is_file()
+
+
+def test_repo_config_dir_raises_a_clear_error_when_missing(monkeypatch) -> None:
+    monkeypatch.setattr(image, "__file__", "/nonexistent/src/ocbox/image.py")
+    with pytest.raises(FileNotFoundError, match="pip install -e"):
+        image.repo_config_dir()
+
+
 def test_all_supported_distros_have_a_containerfile_on_disk() -> None:
     for base_os in image.DISTROS:
         path = image.data_dir() / "distros" / base_os / "Containerfile"

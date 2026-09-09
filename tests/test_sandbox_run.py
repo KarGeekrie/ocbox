@@ -41,7 +41,7 @@ def mocked_run_env(tmp_path, monkeypatch):
         patch("ocbox.sandbox.prompt_extra_packages", return_value=([], [])),
         patch("ocbox.sandbox.launch") as mock_launch,
     ):
-        mock_image.data_dir.return_value = data_dir
+        mock_image.repo_config_dir.return_value = data_dir
         mock_image.packages_fingerprint.return_value = "fp"
         mock_image.containerfile_fingerprint.return_value = "basefp"
         mock_image.image_exists.return_value = True

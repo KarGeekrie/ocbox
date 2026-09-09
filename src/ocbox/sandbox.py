@@ -220,7 +220,7 @@ def _resolve_user_config() -> Path:
     """
     if USER_CONFIG_PATH.exists():
         return USER_CONFIG_PATH
-    return image.data_dir() / "opencode.jsonc"
+    return image.repo_config_dir() / "opencode.jsonc"
 
 
 def _generate_opencode_config(container_llm_port: int) -> dict:
@@ -310,8 +310,8 @@ def run(
 
     container_llm_port = 8081
     container_web_port = cfg.container_web_port
-    resolved_agents_dir = agents_dir or (image.data_dir() / "agents")
-    resolved_skills_dir = skills_dir or (image.data_dir() / "skills")
+    resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
+    resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
     resolved_user_config = user_config or _resolve_user_config()
 
     opencode_config_path = run_dir / "opencode.json"
