@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from ocbox import project, update_check
 from ocbox.config import ConfigError, load_config
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError, run_preflight
@@ -56,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skills-dir", type=Path, default=None, help="Override the default skills/ directory."
     )
+    parser.add_argument(
+        "--detach",
+        "-d",
+        action="store_true",
+        help="Run the web sandbox in the background, surviving this terminal closing. "
+        "Web mode only. Track it with `podman ps`/`podman logs`/`podman stop` on the "
+        "printed container name.",
+    )
     return parser
 
 
@@ -80,11 +89,27 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(ocbox_argv)
     cwd = Path.cwd()
 
+    if args.detach and args.tui:
+        print(
+            "ocbox: --detach doesn't apply to --tui - there'd be nothing attached to "
+            "it to make backgrounding meaningful",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         check_opencode_args(opencode_args, mode="tui" if args.tui else "web")
     except OpencodeArgsError as exc:
         print(f"ocbox: {exc}", file=sys.stderr)
         return 1
+
+    latest = update_check.check_for_update(project.cache_dir())
+    if latest:
+        print(
+            f"ocbox: a newer version is available ({latest}) - "
+            "see https://github.com/KarGeekrie/ocbox/releases",
+            file=sys.stderr,
+        )
 
     try:
         run_preflight()
@@ -112,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             skills_dir=args.skills_dir,
             host_web_port=args.web_port,
             opencode_args=opencode_args,
+            detach=args.detach,
         )
     except PodmanError as exc:
         print(f"ocbox: {exc}", file=sys.stderr)

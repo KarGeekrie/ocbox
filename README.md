@@ -204,6 +204,27 @@ second one through untouched. `--port` and `--hostname` are refused: ocbox
 sets them to wire OpenCode to the relay, and a second value would detach it.
 Use `--web-port` to choose the host port instead.
 
+### Running detached
+
+`--detach` (`-d`, web mode only) backgrounds the whole sandbox so it survives
+closing the terminal - like `nohup ocbox &`, but ocbox does the forking
+itself so the relay bridges it owns (the only thing standing between the
+network-isolated container and your LLM/browser) stay alive too:
+
+```sh
+ocbox --detach
+# ocbox: detached (pid 12345), container ocbox-myproj-a1b2c3d4e5f6
+#   progress/URL: tail -f /run/user/1000/ocbox/myproj-.../ocbox.log
+#   status:       podman ps --filter name=ocbox-myproj-a1b2c3d4e5f6
+#   stop:         podman stop ocbox-myproj-a1b2c3d4e5f6
+```
+
+Any interactive package prompt still runs before it detaches; everything
+after that - including the connect banner with the URL and password - goes
+to the printed log file instead of your terminal. There's no `ocbox --list`;
+track and stop it with `podman` directly, on the container name ocbox
+printed (always `ocbox-<project-slug>`).
+
 Useful flags:
 
 | Flag | Effect |
@@ -216,6 +237,7 @@ Useful flags:
 | `--agents-dir PATH` / `--skills-dir PATH` | Use custom agents/skills instead of the packaged defaults |
 | `--opencode-config PATH` | OpenCode settings (models, theme, ...) instead of `~/.config/ocbox/opencode.jsonc` |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
+| `--detach` / `-d` | Background the sandbox so it survives closing the terminal (web mode only) |
 | `-- ARGS...` | Everything after `--` is forwarded to OpenCode itself |
 
 ## Default skills & agents
@@ -338,6 +360,30 @@ host (or nested container) where that device isn't accessible to your user,
 test fixtures do), and expect the real `image.build_project_image()` /
 `image.ensure_base_image()` (which *do* need network for apt/uv/curl) to
 need `/dev/net/tun` access fixed at the host level instead.
+
+## Scheduling runs
+
+`ocbox --yes -- run "..."` (see "Passing arguments through to OpenCode"
+above) is already non-interactive and exits on its own once OpenCode is
+done - exactly what a cron job needs, no `--detach` involved since cron
+itself already runs headless. Useful for a nightly review against an LLM
+that's only free outside working hours, for instance:
+
+```cron
+0 2 * * * cd /path/to/project && /usr/local/bin/ocbox --yes -- run "review everything changed since yesterday" >> ~/ocbox-nightly-review.log 2>&1
+```
+
+ocbox has no scheduler of its own - `cron`/`systemd --user timers` already
+do this well, and reimplementing one would be dead weight for what's really
+just "run this command later."
+
+## Checking for updates
+
+`ocbox` checks GitHub for a newer release at most once a day (cached in
+`~/.cache/ocbox/update-check.json`) and prints a one-line notice if one
+exists; it never blocks a run on the network (any failure - offline, rate
+limited, nothing tagged yet - is silently ignored). Set
+`OCBOX_SKIP_UPDATE_CHECK=1` to disable it.
 
 ## Development
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import sys
 from dataclasses import dataclass, field
@@ -143,6 +144,31 @@ def launch(plan: RunPlan, podman: PodmanClient):
     return podman.popen(build_podman_run_argv(plan))
 
 
+def daemonize(log_path: Path) -> int:
+    """Forks so the rest of run() - relay bridges included - keeps going in the
+    background, detached from the controlling terminal (like `nohup ... &`).
+
+    The relay processes that bridge the sandboxed container to the network are
+    plain subprocesses of ocbox itself, not the container; only backgrounding
+    ocbox's own process, not just the container, keeps them alive once the
+    terminal goes away. Returns the child's pid to the parent, which should
+    stop right there, and 0 to the child, which continues run() with stdio
+    redirected to `log_path`.
+    """
+    pid = os.fork()
+    if pid > 0:
+        return pid
+    os.setsid()
+    devnull_fd = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull_fd, 0)
+    os.close(devnull_fd)
+    log_fd = os.open(str(log_path), os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+    os.dup2(log_fd, 1)
+    os.dup2(log_fd, 2)
+    os.close(log_fd)
+    return 0
+
+
 USER_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "opencode.jsonc"
 
 
@@ -239,7 +265,11 @@ def run(
     user_config: Path | None = None,
     opencode_args: list[str] | None = None,
     host_web_port: int | None = None,
+    detach: bool = False,
 ) -> int:
+    if detach and mode != "web":
+        raise ValueError("detach only applies to mode='web' - there's nothing to attach it to")
+
     podman = PodmanClient()
     slug = project.project_slug(cwd)
     run_dir = project.runtime_dir(slug)
@@ -310,6 +340,18 @@ def run(
         memory_limit=cfg.memory_limit,
         pids_limit=cfg.pids_limit,
     )
+
+    if detach:
+        log_path = run_dir / "ocbox.log"
+        child_pid = daemonize(log_path)
+        if child_pid:
+            print(
+                f"ocbox: detached (pid {child_pid}), container {container_name}\n"
+                f"  progress/URL: tail -f {log_path}\n"
+                f"  status:       podman ps --filter name={container_name}\n"
+                f"  stop:         podman stop {container_name}"
+            )
+            return 0
 
     llm_relay = network.start_llm_relay(run_dir, cfg.llm_host, cfg.llm_port)
     bridges = network.NetworkBridges(

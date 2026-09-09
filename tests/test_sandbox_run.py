@@ -128,3 +128,35 @@ def test_run_web_mode_stops_container_on_wait_for_socket_failure(
 
     assert exit_code == 1
     mocked_run_env["container_proc"].terminate.assert_called_once()
+
+
+def test_run_detach_with_tui_mode_rejected(tmp_path, mocked_run_env) -> None:
+    with pytest.raises(ValueError, match="detach only applies to mode='web'"):
+        sandbox.run(_cfg(), tmp_path, mode="tui", non_interactive=True, detach=True)
+
+
+def test_run_web_mode_detach_parent_returns_without_touching_the_sandbox(
+    tmp_path, mocked_run_env
+) -> None:
+    """The parent branch (daemonize() returning a real child pid) must print
+    and exit before starting any relay or container - that work belongs to
+    the detached child, not the process the caller's shell is waiting on."""
+    with patch("ocbox.sandbox.daemonize", return_value=4242) as mock_daemonize:
+        exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, detach=True)
+
+    assert exit_code == 0
+    mock_daemonize.assert_called_once()
+    mocked_run_env["network"].start_llm_relay.assert_not_called()
+    mocked_run_env["launch"].assert_not_called()
+
+
+def test_run_web_mode_detach_child_continues_the_normal_flow(tmp_path, mocked_run_env) -> None:
+    """daemonize() returning 0 (the child branch) must fall through to the
+    same relay/launch sequence a non-detached run takes."""
+    with patch("ocbox.sandbox.daemonize", return_value=0) as mock_daemonize:
+        exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, detach=True)
+
+    assert exit_code == 0
+    mock_daemonize.assert_called_once()
+    mocked_run_env["network"].start_llm_relay.assert_called_once()
+    mocked_run_env["launch"].assert_called_once()

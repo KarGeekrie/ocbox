@@ -253,3 +253,27 @@ def test_check_opencode_args_rejects_any_args_in_web_mode() -> None:
 
 def test_check_opencode_args_allows_no_args_in_web_mode() -> None:
     sandbox.check_opencode_args([], mode="web")
+
+
+def test_daemonize_parent_returns_the_childs_pid(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(sandbox.os, "fork", lambda: 4242)
+    assert sandbox.daemonize(tmp_path / "ocbox.log") == 4242
+
+
+def test_daemonize_child_detaches_and_redirects_stdio(monkeypatch, tmp_path) -> None:
+    """Exercises the child branch without ever calling the real os.setsid/dup2 -
+    doing that for real would sever this test process's own stdio."""
+    calls: list[tuple] = []
+    monkeypatch.setattr(sandbox.os, "fork", lambda: 0)
+    monkeypatch.setattr(sandbox.os, "setsid", lambda: calls.append(("setsid",)))
+    monkeypatch.setattr(sandbox.os, "open", lambda *a, **k: calls.append(("open", *a)) or 99)
+    monkeypatch.setattr(sandbox.os, "dup2", lambda fd, target: calls.append(("dup2", fd, target)))
+    monkeypatch.setattr(sandbox.os, "close", lambda fd: calls.append(("close", fd)))
+
+    result = sandbox.daemonize(tmp_path / "ocbox.log")
+
+    assert result == 0
+    assert ("setsid",) in calls
+    assert ("dup2", 99, 1) in calls  # stdout -> the log file
+    assert ("dup2", 99, 2) in calls  # stderr -> the log file
+    assert calls.count(("close", 99)) == 2  # devnull fd and log fd, each closed after dup2'ing

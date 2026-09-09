@@ -101,3 +101,33 @@ def test_main_allows_opencode_args_with_tui(mock_run, mock_config, mock_prefligh
     exit_code = main(["--tui", "--", "--agent", "chat"])
     assert exit_code == 0
     assert mock_run.call_args.kwargs["opencode_args"] == ["--agent", "chat"]
+
+
+def test_main_rejects_detach_with_tui(capsys) -> None:
+    exit_code = main(["--tui", "--detach"])
+    assert exit_code == 1
+    assert "--detach" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", return_value=0)
+def test_main_passes_detach_through(mock_run, mock_config, mock_preflight) -> None:
+    main(["--detach"])
+    assert mock_run.call_args.kwargs["detach"] is True
+
+
+@patch("ocbox.cli.update_check.check_for_update", return_value="v9.9.9")
+@patch("ocbox.cli.run_preflight", side_effect=PreflightError("podman missing"))
+def test_main_prints_a_notice_when_a_newer_release_exists(
+    mock_preflight, mock_check, capsys
+) -> None:
+    main([])
+    assert "v9.9.9" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.update_check.check_for_update", return_value=None)
+@patch("ocbox.cli.run_preflight", side_effect=PreflightError("podman missing"))
+def test_main_prints_nothing_when_up_to_date(mock_preflight, mock_check, capsys) -> None:
+    main([])
+    assert "newer version" not in capsys.readouterr().err

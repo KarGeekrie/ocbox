@@ -70,3 +70,16 @@ def test_state_dir_created(tmp_path: Path, monkeypatch) -> None:
     path = project.state_dir("myslug")
     assert path.exists()
     assert path == tmp_path / "state" / "ocbox" / "myslug"
+
+
+def test_cache_dir_created(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    path = project.cache_dir()
+    assert path.exists()
+    assert path == tmp_path / "cache" / "ocbox"
+
+
+def test_cache_dir_is_not_scoped_to_a_project(tmp_path: Path, monkeypatch) -> None:
+    """Unlike runtime_dir/state_dir, the update-check stamp is global."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    assert project.cache_dir() == project.cache_dir()
