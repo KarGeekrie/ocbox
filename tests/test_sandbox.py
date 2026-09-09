@@ -235,8 +235,21 @@ def test_argv_without_opencode_args_ends_at_the_image_tag() -> None:
 def test_check_opencode_args_rejects_flags_ocbox_owns() -> None:
     for arg in ("--port", "--hostname", "--port=9999"):
         with pytest.raises(sandbox.OpencodeArgsError):
-            sandbox.check_opencode_args(["--model", "local/qwen", arg])
+            sandbox.check_opencode_args(["--model", "local/qwen", arg], mode="tui")
 
 
-def test_check_opencode_args_allows_everything_else() -> None:
-    sandbox.check_opencode_args(["run", "--model", "local/qwen", "--agent", "review"])
+def test_check_opencode_args_allows_everything_else_in_tui_mode() -> None:
+    sandbox.check_opencode_args(
+        ["run", "--model", "local/qwen", "--agent", "review"], mode="tui"
+    )
+
+
+def test_check_opencode_args_rejects_any_args_in_web_mode() -> None:
+    """Web mode appends passthrough to `opencode serve`, which chokes on most
+    of OpenCode's own CLI - so it's refused outright rather than forwarded."""
+    with pytest.raises(sandbox.OpencodeArgsError, match="--tui"):
+        sandbox.check_opencode_args(["--print-logs"], mode="web")
+
+
+def test_check_opencode_args_allows_no_args_in_web_mode() -> None:
+    sandbox.check_opencode_args([], mode="web")

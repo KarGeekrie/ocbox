@@ -85,3 +85,19 @@ def test_split_opencode_args_keeps_later_separators_for_opencode() -> None:
     """Only the first `--` is ocbox's; `opencode run -- ...` must survive."""
     _, opencode_args = cli.split_opencode_args(["--", "run", "--", "hello"])
     assert opencode_args == ["run", "--", "hello"]
+
+
+@patch("ocbox.cli.run_preflight")
+def test_main_rejects_opencode_args_without_tui(mock_preflight, capsys) -> None:
+    exit_code = main(["--", "--print-logs"])
+    assert exit_code == 1
+    assert "--tui" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", return_value=0)
+def test_main_allows_opencode_args_with_tui(mock_run, mock_config, mock_preflight) -> None:
+    exit_code = main(["--tui", "--", "--agent", "chat"])
+    assert exit_code == 0
+    assert mock_run.call_args.kwargs["opencode_args"] == ["--agent", "chat"]

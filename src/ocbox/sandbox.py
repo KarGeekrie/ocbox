@@ -156,7 +156,25 @@ class OpencodeArgsError(ValueError):
     """Raised when forwarded OpenCode args would break the sandbox."""
 
 
-def check_opencode_args(args: list[str]) -> None:
+def check_opencode_args(args: list[str], mode: str = "tui") -> None:
+    """Validates OpenCode passthrough args (`ocbox ... -- <args>`).
+
+    Web mode appends them to `opencode serve`, which - unlike the TUI - does
+    not understand most of OpenCode's own CLI flags (`--agent`, `--continue`,
+    `run`, ...): it just hangs until ocbox's own readiness timeout fires, a
+    confusing failure with nothing pointing at the real cause. Rather than
+    special-case which flags happen to be serve-safe, passthrough is TUI-only;
+    web mode rejects any of it upfront.
+    """
+    if not args:
+        return
+    if mode == "web":
+        raise OpencodeArgsError(
+            "arguments after -- aren't supported in web mode - they'd be "
+            "appended to `opencode serve`, which doesn't understand most of "
+            "OpenCode's own CLI and fails with a confusing timeout instead of "
+            "an error. Use --tui -- ... instead."
+        )
     for arg in args:
         flag = arg.split("=", 1)[0]
         if flag in RESERVED_OPENCODE_FLAGS:

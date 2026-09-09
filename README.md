@@ -192,10 +192,12 @@ ocbox --tui -- --continue                    # resume the last session
 ocbox --tui -y -- run "explain src/relay.py" # non-interactive, prints and exits
 ```
 
-In web mode they are appended to `opencode serve`, so the global flags
-(`--print-logs`, `--log-level`) are the useful ones there; the session flags
-above belong with `--tui`. See <https://opencode.ai/docs/cli/> for the full
-surface.
+Passthrough is TUI-only. Web mode runs `opencode serve`, which doesn't
+understand most of OpenCode's own CLI flags - forwarding them there used to
+just hang until ocbox's readiness check timed out, with nothing pointing at
+the real cause. `ocbox -- ...` (no `--tui`) is refused outright now instead,
+with an error telling you to add `--tui`. See
+<https://opencode.ai/docs/cli/> for the full flag surface.
 
 Only the first `--` is ocbox's, so `ocbox --tui -- run -- ...` passes the
 second one through untouched. `--port` and `--hostname` are refused: ocbox

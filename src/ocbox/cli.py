@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     cwd = Path.cwd()
 
     try:
-        check_opencode_args(opencode_args)
+        check_opencode_args(opencode_args, mode="tui" if args.tui else "web")
     except OpencodeArgsError as exc:
         print(f"ocbox: {exc}", file=sys.stderr)
         return 1
