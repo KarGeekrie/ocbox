@@ -78,13 +78,23 @@ def build_parser() -> argparse.ArgumentParser:
         "printed container name.",
     )
     parser.add_argument(
+        "--mount",
+        action="append",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Mount an additional directory into the sandbox, read-write, alongside the "
+        "current directory (repeatable). Lands at /mnt/<basename> - basenames must be "
+        "distinct across every --mount.",
+    )
+    parser.add_argument(
         "--no-sandbox",
         action="store_true",
         help="Run OpenCode directly on this machine instead of in a sandbox: no Podman, "
         "no network isolation, no conf.py needed. Still installs OpenCode if missing "
         "and wires up opencode-config/'s agents/skills/models. Not compatible with "
-        "--tui/--detach/--web-port/--rebuild/--apt/--uv/--yes/--config, which are all "
-        "sandbox-only.",
+        "--tui/--detach/--web-port/--rebuild/--apt/--uv/--yes/--config/--mount, which "
+        "are all sandbox-only.",
     )
     return parser
 
@@ -128,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             "--uv": args.uv is not None,
             "--yes": args.yes,
             "--config": args.config is not None,
+            "--mount": args.mount is not None,
         }
         conflicts = [flag for flag, present in sandbox_only.items() if present]
         if conflicts:
@@ -143,6 +154,19 @@ def main(argv: list[str] | None = None) -> int:
         except OpencodeArgsError as exc:
             print(f"ocbox: {exc}", file=sys.stderr)
             return 1
+
+    extra_mounts = [p.resolve() for p in (args.mount or [])]
+    for path in extra_mounts:
+        if not path.is_dir():
+            print(f"ocbox: --mount {path} is not a directory", file=sys.stderr)
+            return 1
+    names = [p.name for p in extra_mounts]
+    if len(names) != len(set(names)):
+        print(
+            f"ocbox: --mount directories must have distinct names, got {names}",
+            file=sys.stderr,
+        )
+        return 1
 
     latest = update_check.check_for_update(project.cache_dir())
     if latest:
@@ -193,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             host_web_port=args.web_port,
             opencode_args=opencode_args,
             detach=args.detach,
+            extra_mounts=extra_mounts,
         )
     except PodmanError as exc:
         print(f"ocbox: {exc}", file=sys.stderr)

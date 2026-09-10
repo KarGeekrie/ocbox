@@ -177,7 +177,17 @@ def test_main_forwards_instructions_dir(mock_run, mock_config, mock_preflight) -
 
 @pytest.mark.parametrize(
     "flag",
-    ["--tui", "--detach", "--web-port=1234", "--rebuild", "--apt", "--uv", "--yes", "--config=x"],
+    [
+        "--tui",
+        "--detach",
+        "--web-port=1234",
+        "--rebuild",
+        "--apt",
+        "--uv",
+        "--yes",
+        "--config=x",
+        "--mount=/tmp",
+    ],
 )
 def test_main_rejects_no_sandbox_combined_with_sandbox_only_flags(flag, capsys) -> None:
     exit_code = main(["--no-sandbox", flag])
@@ -190,3 +200,52 @@ def test_main_reports_no_sandbox_error_cleanly(mock_run_no_sandbox, capsys) -> N
     exit_code = main(["--no-sandbox"])
     assert exit_code == 1
     assert "ocbox: ~/.config/opencode/agents exists" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", return_value=0)
+def test_main_forwards_extra_mounts(mock_run, mock_config, mock_preflight, tmp_path) -> None:
+    extra = tmp_path / "other-repo"
+    extra.mkdir()
+    main(["--mount", str(extra)])
+    assert mock_run.call_args.kwargs["extra_mounts"] == [extra.resolve()]
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", return_value=0)
+def test_main_supports_multiple_mount_flags(
+    mock_run, mock_config, mock_preflight, tmp_path
+) -> None:
+    a = tmp_path / "repo-a"
+    b = tmp_path / "repo-b"
+    a.mkdir()
+    b.mkdir()
+    main(["--mount", str(a), "--mount", str(b)])
+    assert mock_run.call_args.kwargs["extra_mounts"] == [a.resolve(), b.resolve()]
+
+
+def test_main_rejects_mount_of_a_nonexistent_directory(tmp_path, capsys) -> None:
+    missing = tmp_path / "does-not-exist"
+    exit_code = main(["--mount", str(missing)])
+    assert exit_code == 1
+    assert "not a directory" in capsys.readouterr().err
+
+
+def test_main_rejects_mount_of_a_file(tmp_path, capsys) -> None:
+    a_file = tmp_path / "not-a-dir.txt"
+    a_file.write_text("hi")
+    exit_code = main(["--mount", str(a_file)])
+    assert exit_code == 1
+    assert "not a directory" in capsys.readouterr().err
+
+
+def test_main_rejects_mounts_with_colliding_basenames(tmp_path, capsys) -> None:
+    a = tmp_path / "one" / "shared"
+    b = tmp_path / "two" / "shared"
+    a.mkdir(parents=True)
+    b.mkdir(parents=True)
+    exit_code = main(["--mount", str(a), "--mount", str(b)])
+    assert exit_code == 1
+    assert "distinct names" in capsys.readouterr().err

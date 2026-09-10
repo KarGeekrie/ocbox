@@ -179,6 +179,32 @@ OpenCode is ready.
 Open the URL, sign in with the printed credentials, and OpenCode is running
 against `myapp/`, isolated from the rest of your machine.
 
+### Mounting extra working directories
+
+Only the current directory is mounted by default. `--mount PATH` (repeatable)
+adds more - useful when a task spans multiple repos, e.g. an app and the
+library it depends on:
+
+```sh
+cd ~/projects/myapp
+ocbox --mount ~/projects/shared-lib --mount ~/projects/other-repo
+```
+
+Each lands read-write at `/mnt/<basename>` (`~/projects/shared-lib` above
+becomes `/mnt/shared-lib`), independent of the primary workspace and of each
+other - basenames must be distinct across every `--mount`, or ocbox refuses
+to start rather than silently mounting one over the other.
+
+**The mount alone may not be enough.** OpenCode's own
+`permission.external_directory` rules (see the example in
+`opencode-config/opencode.jsonc`) are believed to gate access to anything
+outside the primary working directory *regardless* of what's mounted - if
+OpenCode still refuses to read or edit a `/mnt/`-mounted path, add it there,
+e.g. `"external_directory": {"/mnt/shared-lib/*": "allow"}`. ocbox doesn't
+generate this permission entry itself (see AGENTS.md's "Verification
+history" for why). `--no-sandbox` mode doesn't need `--mount` at all - there's
+no filesystem restriction to work around in the first place.
+
 ### Terminal UI instead of the web UI
 
 Prefer working in the terminal? Pass `--tui`:
@@ -288,6 +314,7 @@ Useful flags:
 | `--apt PKG...` / `--uv PKG...` | Set extra packages non-interactively |
 | `--rebuild` | Force a rebuild of the project's sandbox image |
 | `--web-port PORT` | Pin the host port for the web UI (ignored with `--tui`) |
+| `--mount PATH` | Mount another directory read-write at `/mnt/<basename>` (repeatable) |
 | `--agents-dir PATH` / `--skills-dir PATH` / `--instructions-dir PATH` | Use custom agents/skills/instructions instead of the packaged defaults |
 | `--opencode-config PATH` | OpenCode settings (models, theme, ...) instead of `~/.config/ocbox/opencode.jsonc` |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |

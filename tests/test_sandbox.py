@@ -5,6 +5,7 @@ import pytest
 from ocbox import sandbox
 from ocbox.sandbox import (
     AGENTS_DIR_MOUNT,
+    EXTRA_MOUNTS_ROOT,
     INSTRUCTIONS_DIR_MOUNT,
     SKILLS_DIR_MOUNT,
     USER_CONFIG_MOUNT,
@@ -149,6 +150,32 @@ def test_argv_mounts_instructions_dir_after_the_home_volume_it_nests_in() -> Non
         i for i, a in enumerate(argv) if a.endswith(f":{INSTRUCTIONS_DIR_MOUNT}:ro")
     )
     assert home_volume < instructions
+
+
+def test_argv_omits_extra_mounts_when_none_given() -> None:
+    argv = build_podman_run_argv(_plan())
+    assert f"{EXTRA_MOUNTS_ROOT}/" not in " ".join(argv)
+
+
+def test_argv_mounts_each_extra_mount_read_write_by_basename() -> None:
+    argv = build_podman_run_argv(
+        _plan(extra_mounts=[Path("/home/user/other-repo"), Path("/home/user/shared-lib")])
+    )
+    assert f"/home/user/other-repo:{EXTRA_MOUNTS_ROOT}/other-repo:rw" in argv
+    assert f"/home/user/shared-lib:{EXTRA_MOUNTS_ROOT}/shared-lib:rw" in argv
+
+
+def test_runplan_rejects_extra_mounts_with_colliding_basenames() -> None:
+    with pytest.raises(ValueError, match="colliding basenames"):
+        _plan(extra_mounts=[Path("/a/shared"), Path("/b/shared")])
+
+
+def test_argv_mounts_only_workspace_and_ocbox_dirs_plus_extra_mounts() -> None:
+    """Extra mounts don't nest inside /home/ocbox or anything else - they get
+    their own top-level container path, independent of the other mounts."""
+    argv = build_podman_run_argv(_plan(extra_mounts=[Path("/home/user/other-repo")]))
+    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    assert any(m.startswith("/home/user/other-repo:") for m in mounts)
 
 
 def test_argv_mounts_user_config_as_opencode_global_config() -> None:

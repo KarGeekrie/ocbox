@@ -47,6 +47,19 @@ SKILLS_DIR_MOUNT = "/home/ocbox/.config/opencode/skills"
 # whether opencode.jsonc's own precedence-driven copy is this mount or, in
 # --no-sandbox mode, the real ~/.config/opencode/opencode.jsonc symlink.
 INSTRUCTIONS_DIR_MOUNT = "/home/ocbox/.config/opencode/instructions"
+# Root for --mount's extra working directories, one per basename
+# (<host-path>:/mnt/<basename>:rw), independent of /workspace and each other -
+# unlike agents/skills/instructions, nothing here nests inside another mount.
+#
+# CAVEAT (unverified - see AGENTS.md "Verification history"): the mount
+# itself makes a directory visible inside the container, but OpenCode's own
+# `permission.external_directory` rules (see the example in
+# opencode-config/opencode.jsonc) may still need to explicitly allow a path
+# under /mnt/ before OpenCode will actually read/edit it - ocbox does not
+# generate that permission entry itself, since it's unclear whether doing so
+# in the OPENCODE_CONFIG override would merge with or clobber whatever
+# `permission` rules the user's own opencode.jsonc sets.
+EXTRA_MOUNTS_ROOT = "/mnt"
 
 
 @dataclass
@@ -67,6 +80,9 @@ class RunPlan:
     env_file: Path | None = None  # web-only: gates the forwarded UI, unused for tui
     memory_limit: str | None = None
     pids_limit: int | None = None
+    # Additional host directories mounted read-write at /mnt/<name.name>,
+    # alongside the primary `workspace` at /workspace. See EXTRA_MOUNTS_ROOT.
+    extra_mounts: list[Path] = field(default_factory=list)
     # OpenCode's own arguments, forwarded verbatim from `ocbox ... -- <args>`.
     opencode_args: list[str] = field(default_factory=list)
 
@@ -78,6 +94,12 @@ class RunPlan:
                 "RunPlan.env_file is required when mode='web' - it carries the "
                 "auth token that gates the forwarded web UI; without it the "
                 "container would run opencode web with no credentials set."
+            )
+        names = [p.name for p in self.extra_mounts]
+        if len(names) != len(set(names)):
+            raise ValueError(
+                f"extra_mounts have colliding basenames ({names!r}) - each --mount "
+                "needs a directory with a distinct name"
             )
 
 
@@ -109,6 +131,10 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         f"{plan.run_dir}:/run/ocbox:rw",
         "-v",
         f"{plan.opencode_config}:{OPENCODE_CONFIG_MOUNT}:ro",
+    ]
+    for extra in plan.extra_mounts:
+        argv += ["-v", f"{extra}:{EXTRA_MOUNTS_ROOT}/{extra.name}:rw"]
+    argv += [
         "-v",
         f"{plan.data_volume}:/home/ocbox:rw",
         # Must follow the /home/ocbox volume above: they mount inside it.
@@ -282,6 +308,7 @@ def run(
     opencode_args: list[str] | None = None,
     host_web_port: int | None = None,
     detach: bool = False,
+    extra_mounts: list[Path] | None = None,
 ) -> int:
     if detach and mode != "web":
         raise ValueError("detach only applies to mode='web' - there's nothing to attach it to")
@@ -359,6 +386,7 @@ def run(
         mode=mode,
         memory_limit=cfg.memory_limit,
         pids_limit=cfg.pids_limit,
+        extra_mounts=list(extra_mounts or []),
     )
 
     if detach:
