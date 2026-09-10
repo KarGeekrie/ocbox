@@ -5,6 +5,7 @@ everything here is redirected into tmp_path via monkeypatched HOME/XDG vars.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -46,7 +47,7 @@ def test_find_or_install_runs_the_official_installer_when_missing(tmp_path, monk
     assert found == "/usr/local/bin/opencode"
     curl_call, bash_call = mock_run.call_args_list
     assert curl_call.args[0][:2] == ["curl", "-fsSL"]
-    assert bash_call.args[0] == ["bash"]
+    assert bash_call.args[0] == ["bash", "-s", "--", "--no-modify-path"]
     assert bash_call.kwargs["input"] == curl_result.stdout
 
 
@@ -58,63 +59,6 @@ def test_find_or_install_raises_if_still_missing_after_install(tmp_path, monkeyp
         pytest.raises(sandbox.NoSandboxError, match="add its install location to PATH"),
     ):
         sandbox._find_or_install_opencode()
-
-
-# ---- _link_into_opencode_config ----------------------------------------
-
-
-def test_link_creates_a_symlink_when_target_is_absent(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    source = tmp_path / "opencode-config" / "agents"
-    source.mkdir(parents=True)
-
-    sandbox._link_into_opencode_config("agents", source)
-
-    target = tmp_path / "config" / "opencode" / "agents"
-    assert target.is_symlink()
-    assert target.resolve() == source.resolve()
-
-
-def test_link_is_idempotent_when_already_correct(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    source = tmp_path / "opencode-config" / "agents"
-    source.mkdir(parents=True)
-    sandbox._link_into_opencode_config("agents", source)
-
-    sandbox._link_into_opencode_config("agents", source)  # must not raise
-
-    target = tmp_path / "config" / "opencode" / "agents"
-    assert target.resolve() == source.resolve()
-
-
-def test_link_refuses_a_stale_symlink_pointing_outside_ocbox(tmp_path, monkeypatch) -> None:
-    """This used to assert the opposite - that any stale link gets replaced -
-    which is what let a dotfile manager's link be silently overwritten. Only
-    links into ocbox's own opencode-config/ are ocbox's to move; see
-    test_link_repoints_a_stale_link_of_its_own for that case.
-    """
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    old_source = tmp_path / "old-agents"
-    old_source.mkdir()
-    new_source = tmp_path / "opencode-config" / "agents"
-    new_source.mkdir(parents=True)
-
-    sandbox._link_into_opencode_config("agents", old_source)
-    with pytest.raises(sandbox.NoSandboxError, match="doesn't manage"):
-        sandbox._link_into_opencode_config("agents", new_source)
-
-
-def test_link_refuses_to_replace_a_real_pre_existing_directory(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    target = tmp_path / "config" / "opencode" / "agents"
-    target.mkdir(parents=True)
-    (target / "my-own-agent.md").write_text("not ocbox's")
-    source = tmp_path / "opencode-config" / "agents"
-    source.mkdir(parents=True)
-
-    with pytest.raises(sandbox.NoSandboxError, match="isn't managed by ocbox"):
-        sandbox._link_into_opencode_config("agents", source)
-    assert (target / "my-own-agent.md").exists()
 
 
 # ---- run_no_sandbox ----------------------------------------
@@ -173,19 +117,38 @@ def test_run_no_sandbox_strips_a_stale_inherited_opencode_config_env(
     assert "OPENCODE_CONFIG" not in env
 
 
-def test_run_no_sandbox_links_agents_skills_and_jsonc_from_repo_config(
+def test_run_no_sandbox_points_opencode_at_an_assembled_config_dir(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
     sandbox.run_no_sandbox()
 
-    config_home = tmp_path / "config" / "opencode"
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    config_dir = Path(env["OPENCODE_CONFIG_DIR"])
     repo_config = mocked_no_sandbox_env["repo_config"]
-    assert (config_home / "agents").resolve() == (repo_config / "agents").resolve()
-    assert (config_home / "skills").resolve() == (repo_config / "skills").resolve()
-    assert (config_home / "opencode.jsonc").resolve() == (repo_config / "opencode.jsonc").resolve()
+    assert (config_dir / "agents").resolve() == (repo_config / "agents").resolve()
+    assert (config_dir / "skills").resolve() == (repo_config / "skills").resolve()
+    assert (config_dir / "opencode.jsonc").resolve() == (repo_config / "opencode.jsonc").resolve()
 
 
-def test_run_no_sandbox_honors_agents_and_skills_dir_overrides(
+def test_run_no_sandbox_never_touches_the_users_opencode_config(
+    tmp_path, mocked_no_sandbox_env
+) -> None:
+    """The whole point of the env-var approach: ~/.config/opencode is neither
+    read nor written, so a config the user already has is left alone."""
+    users_config = tmp_path / "config" / "opencode"
+    users_config.mkdir(parents=True)
+    (users_config / "agents").mkdir()
+    (users_config / "agents" / "theirs.md").write_text("---\ndescription: mine\n---\n")
+
+    sandbox.run_no_sandbox()
+
+    assert (users_config / "agents" / "theirs.md").exists()
+    assert not (users_config / "agents" / "theirs.md").is_symlink()
+    assert not (users_config / "opencode.jsonc").exists()
+    assert not (users_config / "skills").exists()
+
+
+def test_run_no_sandbox_assembled_dir_honors_the_dir_overrides(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
     custom_agents = tmp_path / "my-agents"
@@ -193,28 +156,13 @@ def test_run_no_sandbox_honors_agents_and_skills_dir_overrides(
 
     sandbox.run_no_sandbox(agents_dir=custom_agents)
 
-    config_home = tmp_path / "config" / "opencode"
-    assert (config_home / "agents").resolve() == custom_agents.resolve()
-
-
-
-def test_run_no_sandbox_propagates_link_errors_as_no_sandbox_error(
-    tmp_path, mocked_no_sandbox_env
-) -> None:
-    config_home = tmp_path / "config" / "opencode"
-    (config_home / "agents").mkdir(parents=True)
-    (config_home / "agents" / "mine.md").write_text("not ocbox's")
-
-    with pytest.raises(sandbox.NoSandboxError):
-        sandbox.run_no_sandbox()
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    assert (Path(env["OPENCODE_CONFIG_DIR"]) / "agents").resolve() == custom_agents.resolve()
 
 
 def test_run_no_sandbox_prefers_the_users_own_opencode_jsonc(
     tmp_path, monkeypatch, mocked_no_sandbox_env
 ) -> None:
-    """The branch the non-hermetic version of the fixture was accidentally
-    exercising: a user with ~/.config/ocbox/opencode.jsonc gets theirs linked,
-    not the repo default."""
     user_file = tmp_path / "user" / "opencode.jsonc"
     user_file.parent.mkdir()
     user_file.write_text('{"provider": {"local": {}}}')
@@ -222,40 +170,6 @@ def test_run_no_sandbox_prefers_the_users_own_opencode_jsonc(
 
     sandbox.run_no_sandbox()
 
-    linked = tmp_path / "config" / "opencode" / "opencode.jsonc"
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    linked = Path(env["OPENCODE_CONFIG_DIR"]) / "opencode.jsonc"
     assert linked.resolve() == user_file.resolve()
-
-
-def test_link_refuses_to_replace_a_symlink_ocbox_does_not_manage(
-    tmp_path, monkeypatch, mocked_no_sandbox_env
-) -> None:
-    """Dotfile managers (stow, chezmoi, a hand-made link) point these at their
-    own tree. Replacing one silently would rewire the user's OpenCode setup
-    with nothing to show what changed."""
-    repo_config = mocked_no_sandbox_env["repo_config"]
-    theirs = tmp_path / "dotfiles" / "agents"
-    theirs.mkdir(parents=True)
-    config_home = tmp_path / "config" / "opencode"
-    config_home.mkdir(parents=True, exist_ok=True)
-    (config_home / "agents").symlink_to(theirs, target_is_directory=True)
-
-    with pytest.raises(sandbox.NoSandboxError, match="doesn't manage"):
-        sandbox._link_into_opencode_config("agents", repo_config / "agents")
-
-    assert (config_home / "agents").readlink() == theirs
-
-
-def test_link_repoints_a_stale_link_of_its_own(
-    tmp_path, monkeypatch, mocked_no_sandbox_env
-) -> None:
-    """A link left by an earlier --agents-dir is ocbox's to move."""
-    repo_config = mocked_no_sandbox_env["repo_config"]
-    stale = repo_config / "agents-old"
-    stale.mkdir()
-    config_home = tmp_path / "config" / "opencode"
-    config_home.mkdir(parents=True, exist_ok=True)
-    (config_home / "agents").symlink_to(stale, target_is_directory=True)
-
-    sandbox._link_into_opencode_config("agents", repo_config / "agents")
-
-    assert (config_home / "agents").readlink() == repo_config / "agents"

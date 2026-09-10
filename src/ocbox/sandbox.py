@@ -463,7 +463,12 @@ def _find_or_install_opencode() -> str:
     )
     # The installer assumes bash (`set -euo pipefail` on its own line 2) -
     # piping into plain `sh` breaks wherever that's dash, e.g. Debian/Ubuntu.
-    subprocess.run(["bash"], input=curl.stdout, check=True)
+    # --no-modify-path because ocbox has no business editing someone's
+    # ~/.bashrc: it finds the binary at ~/.opencode/bin itself if the install
+    # didn't put it on PATH.
+    subprocess.run(
+        ["bash", "-s", "--", "--no-modify-path"], input=curl.stdout, check=True
+    )
 
     found = shutil.which("opencode")
     if found:
@@ -476,56 +481,30 @@ def _find_or_install_opencode() -> str:
     )
 
 
-def _opencode_config_home() -> Path:
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".config"
-    return base / "opencode"
 
+def _build_no_sandbox_config_dir(
+    agents_dir: Path, skills_dir: Path, user_config: Path
+) -> Path:
+    """Assembles a config directory for OpenCode out of ocbox's own state dir.
 
-def _is_ocbox_managed(target: Path) -> bool:
-    """True when `target` already points inside ocbox's own opencode-config/.
-
-    Distinguishes a link this tool made (or one from another ocbox checkout,
-    or an earlier --agents-dir override) from a link the user made for their
-    own reasons, which must not be touched.
+    OPENCODE_CONFIG_DIR takes a single directory, but --agents-dir/--skills-dir
+    can point anywhere, so this stitches them together with symlinks in a
+    directory ocbox owns outright. Nothing under the user's ~/.config/opencode
+    is read or written, and the repo checkout stays clean - OpenCode drops a
+    housekeeping .gitignore into whatever it's given, which lands here instead.
     """
-    try:
-        resolved = target.resolve()
-        repo_config = image.repo_config_dir().resolve()
-    except (OSError, FileNotFoundError):
-        return False
-    return resolved == repo_config or repo_config in resolved.parents
-
-
-def _link_into_opencode_config(name: str, source: Path) -> None:
-    """Symlinks OpenCode's real global `name` path at `source` - the host
-    equivalent of a sandboxed run's read-only bind-mount. Refuses to touch
-    anything that isn't already ocbox's own symlink, so a real pre-existing
-    agents/skills/opencode.jsonc is never silently replaced.
-    """
-    target = _opencode_config_home() / name
-    if target.is_symlink():
-        if target.resolve() == source.resolve():
-            return
-        # Someone else's symlink - dotfile managers (stow, chezmoi, a hand-made
-        # link) point these at their own tree, and replacing one silently would
-        # rewire their OpenCode setup with nothing to show what changed. Only a
-        # link into ocbox's own config directory is ours to move.
-        if not _is_ocbox_managed(target):
-            raise NoSandboxError(
-                f"{target} is a symlink to {os.readlink(target)}, which ocbox "
-                "doesn't manage - point it at opencode-config/ yourself, or move "
-                "it aside, before using --no-sandbox."
-            )
-        target.unlink()
-    elif target.exists():
-        raise NoSandboxError(
-            f"{target} already exists and isn't managed by ocbox - move it "
-            "aside (or fold what you want into opencode-config/) before "
-            "using --no-sandbox, which needs to symlink it there."
-        )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.symlink_to(source, target_is_directory=source.is_dir())
+    config_dir = project.state_dir("no-sandbox") / "opencode-config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    for name, source in (
+        ("agents", agents_dir),
+        ("skills", skills_dir),
+        ("opencode.jsonc", user_config),
+    ):
+        link = config_dir / name
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(source, target_is_directory=source.is_dir())
+    return config_dir
 
 
 def run_no_sandbox(
@@ -539,15 +518,21 @@ def run_no_sandbox(
 
     Trades ocbox's whole sandboxing story for convenience: it still installs
     OpenCode if missing and wires up the same agents/skills/model config from
-    opencode-config/ (symlinked into OpenCode's real global config directory,
-    since there's no bind-mount to do it for us), but nothing here limits
-    what OpenCode can touch on this machine or reach over the network. Use
-    --tui or the default web mode for the actual sandbox.
+    opencode-config/, but nothing here limits what OpenCode can touch on this
+    machine or reach over the network. Use --tui or the default web mode for
+    the actual sandbox.
 
-    Unlike the sandboxed modes, this needs no LLM_HOST/LLM_PORT from conf.py
-    and generates no provider override: there's no relay to point OpenCode
-    at, so opencode.jsonc's own baseURL - reachable directly, since nothing
-    here is network-isolated - is used exactly as the user wrote it.
+    Everything is passed by environment variable rather than written into the
+    user's home: OPENCODE_CONFIG_DIR points at a directory ocbox assembles in
+    its own state dir, so ~/.config/opencode is neither read nor modified.
+    That does mean a global OpenCode config already on this machine is
+    bypassed, not merged - ocbox supplies the whole config set, exactly as it
+    does inside a sandbox.
+
+    Unlike the sandboxed modes, this needs no LLM_HOST/LLM_PORT from conf.py:
+    there's no relay to point OpenCode at, so opencode.jsonc's own baseURL -
+    reachable directly, since nothing here is network-isolated - is used as
+    the user wrote it.
     """
     opencode_bin = _find_or_install_opencode()
 
@@ -555,15 +540,19 @@ def run_no_sandbox(
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
     resolved_user_config = user_config or _resolve_user_config()
 
-    _link_into_opencode_config("agents", resolved_agents_dir)
-    _link_into_opencode_config("skills", resolved_skills_dir)
-    _link_into_opencode_config("opencode.jsonc", resolved_user_config)
+    config_dir = _build_no_sandbox_config_dir(
+        resolved_agents_dir, resolved_skills_dir, resolved_user_config
+    )
 
     print(
         "ocbox: running OpenCode directly on this machine - no sandbox, no "
         "network isolation. Ctrl-C or OpenCode's own quit key to stop.\n"
     )
     env = os.environ.copy()
-    env.pop("OPENCODE_CONFIG", None)  # use the symlinked global config, not a stale override
+    env["OPENCODE_CONFIG_DIR"] = str(config_dir)
+    # The assembled directory already carries the right opencode.jsonc, and a
+    # stale OPENCODE_CONFIG inherited from a sandboxed run would point at a
+    # relay that isn't running here.
+    env.pop("OPENCODE_CONFIG", None)
     os.execvpe(opencode_bin, [opencode_bin, *(opencode_args or [])], env)
     return 0  # unreachable - execvpe replaces this process on success

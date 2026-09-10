@@ -226,7 +226,8 @@ quit key is (or close the terminal) to stop the sandbox.
 `--no-sandbox` drops the whole point of ocbox - isolation - in exchange for
 convenience: it installs OpenCode if missing (the same official script the
 sandbox image uses, just run on this machine instead of during an image
-build) and wires up `opencode-config/`'s agents, skills and models, then
+build, with `--no-modify-path` so it doesn't edit your shell rc files - ocbox
+finds the binary at `~/.opencode/bin` itself) and wires up `opencode-config/`'s agents, skills and models, then
 runs plain `opencode` directly on the host, no Podman involved at all:
 
 ```sh
@@ -240,18 +241,34 @@ touch anything this user can), no network restriction (no relay, no
 just want ocbox's install/config convenience without the container overhead;
 reach for the default web mode or `--tui` whenever that trust doesn't hold.
 
-Agents/skills/the model config are symlinked from
-`opencode-config/` (or your `--agents-dir`/`--skills-dir`/
-`--opencode-config` override) into OpenCode's real
-global config directory (`~/.config/opencode/`) - the host equivalent of the
-sandbox's read-only bind-mount. ocbox refuses to touch anything already
-there that isn't its own symlink, so a pre-existing global OpenCode config
-of your own is never silently replaced.
+**Your own OpenCode config is left completely alone.** ocbox assembles
+`opencode-config/`'s agents, skills and model config (or your
+`--agents-dir`/`--skills-dir`/`--opencode-config` overrides) into a directory
+under its own state dir, then points OpenCode at it with
+`OPENCODE_CONFIG_DIR` - nothing is written to, or read from,
+`~/.config/opencode/`. OpenCode installs plugin dependencies into whatever
+config directory it is given, which is another reason that lands in ocbox's
+state dir rather than in your checkout or your home.
+
+The flip side is worth knowing: because ocbox supplies the *whole* config
+directory, a global OpenCode config you already have is **bypassed, not
+merged** - your own global agents and `AGENTS.md` won't be visible in this
+mode. That mirrors what a sandboxed run does, where only what ocbox mounts
+exists. Project-level `AGENTS.md` files in the directory you run from are
+unaffected and still load.
+
+(OpenCode itself may still create `~/.config/opencode/` and drop a small
+housekeeping `.gitignore` there. That happens whether or not ocbox is
+involved - it is OpenCode's own behaviour, not something ocbox does.)
 
 **No `conf.py` needed for this mode.** Unlike web/`--tui`, ocbox generates no
 provider override here - there's no relay to point at, so
 `opencode.jsonc`'s own `provider.local.options.baseURL` is used exactly as
-written, pointed straight at your LLM server. `conf.py`'s `LLM_HOST`/
+written, pointed straight at your LLM server. That makes the `baseURL` in
+whichever `opencode.jsonc` wins **required** for this mode: if
+`~/.config/ocbox/opencode.jsonc` exists it takes priority over the repo's,
+so a copy carrying only `models` and no `baseURL` fails with
+`"undefined/chat/completions" cannot be parsed as a URL`. `conf.py`'s `LLM_HOST`/
 `LLM_PORT` stay required for the sandboxed modes specifically: the relay has
 to be dialed and listening *before* OpenCode's config is ever read, from
 outside the container, so ocbox needs them as plain values upfront rather
