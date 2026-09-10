@@ -75,9 +75,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-sandbox",
         action="store_true",
         help="Run OpenCode directly on this machine instead of in a sandbox: no Podman, "
-        "no network isolation. Still installs OpenCode if missing and wires up "
-        "opencode-config/'s agents/skills/models. Not compatible with --tui/--detach/"
-        "--web-port/--rebuild/--apt/--uv/--yes, which are all sandbox-only.",
+        "no network isolation, no conf.py needed. Still installs OpenCode if missing "
+        "and wires up opencode-config/'s agents/skills/models. Not compatible with "
+        "--tui/--detach/--web-port/--rebuild/--apt/--uv/--yes/--config, which are all "
+        "sandbox-only.",
     )
     return parser
 
@@ -120,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             "--apt": args.apt is not None,
             "--uv": args.uv is not None,
             "--yes": args.yes,
+            "--config": args.config is not None,
         }
         conflicts = [flag for flag, present in sandbox_only.items() if present]
         if conflicts:
@@ -144,24 +146,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    if not args.no_sandbox:
-        try:
-            run_preflight()
-        except PreflightError as exc:
-            print(f"ocbox: {exc}", file=sys.stderr)
-            return 1
-
-    try:
-        cfg = load_config(explicit_path=args.config, project_dir=cwd)
-    except ConfigError as exc:
-        print(f"ocbox: {exc}", file=sys.stderr)
-        return 1
-
     if args.no_sandbox:
         try:
             return run_no_sandbox(
-                cfg,
-                cwd,
                 agents_dir=args.agents_dir,
                 user_config=args.opencode_config,
                 skills_dir=args.skills_dir,
@@ -170,6 +157,18 @@ def main(argv: list[str] | None = None) -> int:
         except NoSandboxError as exc:
             print(f"ocbox: {exc}", file=sys.stderr)
             return 1
+
+    try:
+        run_preflight()
+    except PreflightError as exc:
+        print(f"ocbox: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        cfg = load_config(explicit_path=args.config, project_dir=cwd)
+    except ConfigError as exc:
+        print(f"ocbox: {exc}", file=sys.stderr)
+        return 1
 
     try:
         return run(

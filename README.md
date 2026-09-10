@@ -141,10 +141,13 @@ if you'd rather keep it out of the repo):
 
 ocbox mounts this as OpenCode's *global* config, which sits below ocbox's own
 generated config in OpenCode's precedence order. Everything you put here is
-merged in, but ocbox keeps control of `provider.local.options.baseURL` - that
-points at the relay reaching your LLM, so setting it yourself has no effect.
-Anything else from <https://opencode.ai/config.json> works here: a default
-`model`, `theme`, `permission` rules, and so on.
+merged in, but in web/`--tui` mode ocbox keeps control of
+`provider.local.options.baseURL` - that points at the relay reaching your
+LLM, so setting it yourself has no effect there. Anything else from
+<https://opencode.ai/config.json> works here: a default `model`, `theme`,
+`permission` rules, and so on. (In `--no-sandbox` mode this file is used
+exactly as written, `baseURL` included - see "Running without a sandbox"
+below.)
 
 Check it landed with `opencode models` from inside a sandbox - you want to see
 `local/...` lines. `--opencode-config PATH` overrides the file per run.
@@ -202,19 +205,29 @@ ocbox --no-sandbox -- run "..." # any OpenCode CLI form works - nothing is reser
 
 **Nothing is isolated in this mode**: no filesystem restriction (OpenCode can
 touch anything this user can), no network restriction (no relay, no
-`--network=none` - it talks to `LLM_HOST:LLM_PORT` directly). Use it when you
-trust what OpenCode is about to do and just want ocbox's install/config
-convenience without the container overhead; reach for the default web mode
-or `--tui` whenever that trust doesn't hold.
+`--network=none`). Use it when you trust what OpenCode is about to do and
+just want ocbox's install/config convenience without the container overhead;
+reach for the default web mode or `--tui` whenever that trust doesn't hold.
 
 Agents/skills/the model config are symlinked from `opencode-config/` (or
 your `--agents-dir`/`--skills-dir`/`--opencode-config` overrides) into
 OpenCode's real global config directory (`~/.config/opencode/`) - the host
 equivalent of the sandbox's read-only bind-mount. ocbox refuses to touch
 anything already there that isn't its own symlink, so a pre-existing global
-OpenCode config of your own is never silently replaced. Not compatible with
-`--tui`, `--detach`, `--web-port`, `--rebuild`, `--apt`/`--uv`, or `--yes` -
-all sandbox/image-specific and meaningless here.
+OpenCode config of your own is never silently replaced.
+
+**No `conf.py` needed for this mode.** Unlike web/`--tui`, ocbox generates no
+provider override here - there's no relay to point at, so
+`opencode.jsonc`'s own `provider.local.options.baseURL` is used exactly as
+written, pointed straight at your LLM server. `conf.py`'s `LLM_HOST`/
+`LLM_PORT` stay required for the sandboxed modes specifically: the relay has
+to be dialed and listening *before* OpenCode's config is ever read, from
+outside the container, so ocbox needs them as plain values upfront rather
+than discovered by parsing `opencode.jsonc` after the fact.
+
+Not compatible with `--tui`, `--detach`, `--web-port`, `--rebuild`,
+`--apt`/`--uv`, `--yes`, or `--config` - all sandbox/image-specific and
+meaningless here.
 
 ### Passing arguments through to OpenCode
 

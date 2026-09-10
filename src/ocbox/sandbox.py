@@ -475,8 +475,6 @@ def _link_into_opencode_config(name: str, source: Path) -> None:
 
 
 def run_no_sandbox(
-    cfg: Config,
-    cwd: Path,
     *,
     agents_dir: Path | None = None,
     skills_dir: Path | None = None,
@@ -491,6 +489,11 @@ def run_no_sandbox(
     since there's no bind-mount to do it for us), but nothing here limits
     what OpenCode can touch on this machine or reach over the network. Use
     --tui or the default web mode for the actual sandbox.
+
+    Unlike the sandboxed modes, this needs no LLM_HOST/LLM_PORT from conf.py
+    and generates no provider override: there's no relay to point OpenCode
+    at, so opencode.jsonc's own baseURL - reachable directly, since nothing
+    here is network-isolated - is used exactly as the user wrote it.
     """
     opencode_bin = _find_or_install_opencode()
 
@@ -502,19 +505,11 @@ def run_no_sandbox(
     _link_into_opencode_config("skills", resolved_skills_dir)
     _link_into_opencode_config("opencode.jsonc", resolved_user_config)
 
-    slug = project.project_slug(cwd)
-    provider_config_path = project.runtime_dir(slug) / "opencode.json"
-    provider_config_path.write_text(
-        json.dumps(
-            _generate_opencode_config(f"http://{cfg.llm_host}:{cfg.llm_port}/v1"), indent=2
-        )
-    )
-
     print(
         "ocbox: running OpenCode directly on this machine - no sandbox, no "
         "network isolation. Ctrl-C or OpenCode's own quit key to stop.\n"
     )
     env = os.environ.copy()
-    env["OPENCODE_CONFIG"] = str(provider_config_path)
+    env.pop("OPENCODE_CONFIG", None)  # use the symlinked global config, not a stale override
     os.execvpe(opencode_bin, [opencode_bin, *(opencode_args or [])], env)
     return 0  # unreachable - execvpe replaces this process on success

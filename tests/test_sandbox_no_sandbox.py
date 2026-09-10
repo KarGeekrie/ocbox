@@ -5,21 +5,11 @@ everything here is redirected into tmp_path via monkeypatched HOME/XDG vars.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from ocbox import sandbox
-from ocbox.config import Config
-
-
-def _cfg(**overrides) -> Config:
-    defaults = {"llm_host": "127.0.0.1", "llm_port": 11434}
-    defaults.update(overrides)
-    return Config(**defaults)
-
 
 # ---- _find_or_install_opencode ----------------------------------------
 
@@ -129,13 +119,12 @@ def test_link_refuses_to_replace_a_real_pre_existing_directory(tmp_path, monkeyp
 
 @pytest.fixture
 def mocked_no_sandbox_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
     repo_config = tmp_path / "opencode-config"
     (repo_config / "agents").mkdir(parents=True)
     (repo_config / "skills").mkdir(parents=True)
-    (repo_config / "opencode.jsonc").write_text("{}")
+    (repo_config / "opencode.jsonc").write_text('{"provider": {"local": {}}}')
 
     with (
         patch("ocbox.sandbox.image") as mock_image,
@@ -146,32 +135,40 @@ def mocked_no_sandbox_env(tmp_path, monkeypatch):
         yield {"repo_config": repo_config, "execvpe": mock_execvpe}
 
 
-def test_run_no_sandbox_execs_opencode_with_passthrough_args(
-    tmp_path, mocked_no_sandbox_env
-) -> None:
-    sandbox.run_no_sandbox(_cfg(), tmp_path, opencode_args=["run", "hello"])
+def test_run_no_sandbox_execs_opencode_with_passthrough_args(mocked_no_sandbox_env) -> None:
+    sandbox.run_no_sandbox(opencode_args=["run", "hello"])
 
     mocked_no_sandbox_env["execvpe"].assert_called_once()
-    bin_path, argv, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    bin_path, argv, _env = mocked_no_sandbox_env["execvpe"].call_args.args
     assert bin_path == "/usr/bin/opencode"
     assert argv == ["/usr/bin/opencode", "run", "hello"]
-    assert "OPENCODE_CONFIG" in env
 
 
-def test_run_no_sandbox_generated_config_points_directly_at_the_llm(
-    tmp_path, mocked_no_sandbox_env
-) -> None:
-    sandbox.run_no_sandbox(_cfg(llm_host="10.0.0.5", llm_port=9999), tmp_path)
+def test_run_no_sandbox_generates_no_provider_override(mocked_no_sandbox_env) -> None:
+    """Unlike the sandboxed modes, there's no relay to point at - OpenCode
+    must read baseURL straight from the symlinked opencode.jsonc, so ocbox
+    must not inject an OPENCODE_CONFIG override that would shadow it."""
+    sandbox.run_no_sandbox()
 
     _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
-    written = json.loads(Path(env["OPENCODE_CONFIG"]).read_text())
-    assert written["provider"]["local"]["options"]["baseURL"] == "http://10.0.0.5:9999/v1"
+    assert "OPENCODE_CONFIG" not in env
+
+
+def test_run_no_sandbox_strips_a_stale_inherited_opencode_config_env(
+    mocked_no_sandbox_env, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENCODE_CONFIG", "/some/stale/relay/config.json")
+
+    sandbox.run_no_sandbox()
+
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    assert "OPENCODE_CONFIG" not in env
 
 
 def test_run_no_sandbox_links_agents_skills_and_jsonc_from_repo_config(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
-    sandbox.run_no_sandbox(_cfg(), tmp_path)
+    sandbox.run_no_sandbox()
 
     config_home = tmp_path / "config" / "opencode"
     repo_config = mocked_no_sandbox_env["repo_config"]
@@ -186,7 +183,7 @@ def test_run_no_sandbox_honors_agents_and_skills_dir_overrides(
     custom_agents = tmp_path / "my-agents"
     custom_agents.mkdir()
 
-    sandbox.run_no_sandbox(_cfg(), tmp_path, agents_dir=custom_agents)
+    sandbox.run_no_sandbox(agents_dir=custom_agents)
 
     config_home = tmp_path / "config" / "opencode"
     assert (config_home / "agents").resolve() == custom_agents.resolve()
@@ -200,4 +197,4 @@ def test_run_no_sandbox_propagates_link_errors_as_no_sandbox_error(
     (config_home / "agents" / "mine.md").write_text("not ocbox's")
 
     with pytest.raises(sandbox.NoSandboxError):
-        sandbox.run_no_sandbox(_cfg(), tmp_path)
+        sandbox.run_no_sandbox()
