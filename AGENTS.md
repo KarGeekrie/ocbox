@@ -140,6 +140,17 @@ opencode 1.18.29 and its published schema:
   same UI - and prints the URL for you to open.
 - **Bare `opencode` is the TUI**: `opencode --help` lists it as the default
   command, which is what `--tui` relies on.
+- **`instructions` does not work - use `AGENTS.md`**: ocbox briefly shipped
+  an `opencode-config/instructions/` directory wired to OpenCode's
+  `instructions` config key. The key is real and survives
+  `opencode debug config`, but OpenCode's V2 docs state it "currently parses
+  and retains this field but does not resolve its entries into instruction
+  sources", so its contents "do not reach the model yet"
+  (<https://opencode.ai/v2/docs/instructions>). The directory and the
+  `--instructions-dir` flag were removed; standing instructions belong in
+  `~/.config/opencode/AGENTS.md` or the project's own `AGENTS.md`, generated
+  by `/init` inside an OpenCode session. A textbook case of the silent no-op
+  this file warns about: it looked configured and did nothing.
 
 Worth knowing when changing any of this: OpenCode ignores config keys it
 doesn't recognise instead of rejecting them, so a wrong key name disables a

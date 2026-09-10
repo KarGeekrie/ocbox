@@ -161,20 +161,6 @@ def test_main_no_sandbox_forwards_opencode_args(mock_run_no_sandbox) -> None:
     assert mock_run_no_sandbox.call_args.kwargs["opencode_args"] == ["run", "hello"]
 
 
-@patch("ocbox.cli.run_no_sandbox", return_value=0)
-def test_main_no_sandbox_forwards_instructions_dir(mock_run_no_sandbox) -> None:
-    main(["--no-sandbox", "--instructions-dir", "/tmp/my-instructions"])
-    assert str(mock_run_no_sandbox.call_args.kwargs["instructions_dir"]) == "/tmp/my-instructions"
-
-
-@patch("ocbox.cli.run_preflight")
-@patch("ocbox.cli.load_config")
-@patch("ocbox.cli.run", return_value=0)
-def test_main_forwards_instructions_dir(mock_run, mock_config, mock_preflight) -> None:
-    main(["--instructions-dir", "/tmp/my-instructions"])
-    assert str(mock_run.call_args.kwargs["instructions_dir"]) == "/tmp/my-instructions"
-
-
 @pytest.mark.parametrize(
     "flag",
     [

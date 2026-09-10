@@ -32,7 +32,6 @@ def mocked_run_env(tmp_path, monkeypatch):
     (data_dir / "agents").mkdir()
     (data_dir / "opencode.jsonc").write_text("{}")
     (data_dir / "skills").mkdir()
-    (data_dir / "instructions").mkdir()
 
     with (
         patch("ocbox.sandbox.PodmanClient") as mock_podman_cls,

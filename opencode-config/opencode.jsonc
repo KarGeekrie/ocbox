@@ -16,16 +16,16 @@
   // this file otherwise. Point --opencode-config at another file to override
   // per invocation.
   //
-  // NOTE: several keys below (lsp, compaction, attachment, disabled_providers,
-  // instructions) are unverified against OpenCode's published schema in this
-  // repo - check `opencode debug config` after your first real run to
-  // confirm they survived (OpenCode drops keys it doesn't recognise
-  // silently, without an error - see AGENTS.md's "Verification history").
-  // "instructions" in particular is a guess at the mechanism, not just the
-  // content - see opencode-config/instructions/README.md.
+  // Verified against opencode 1.18.29: every key below survives
+  // `opencode debug config`. Check any key you add the same way - OpenCode
+  // drops keys it doesn't recognise silently, without an error, so a typo
+  // reads as a setting that quietly does nothing.
+  //
+  // Standing instructions do NOT belong here: OpenCode's `instructions` key
+  // is parsed but never resolved, so its contents never reach the model.
+  // Use AGENTS.md instead - see the README.
 
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["instructions/*.md"],
   "lsp": true,
   // Disable session sharing
   "share": "disabled",

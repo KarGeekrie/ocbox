@@ -64,12 +64,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--skills-dir", type=Path, default=None, help="Override the default skills/ directory."
     )
     parser.add_argument(
-        "--instructions-dir",
-        type=Path,
-        default=None,
-        help="Override the default instructions/ directory.",
-    )
-    parser.add_argument(
         "--detach",
         "-d",
         action="store_true",
@@ -182,7 +176,6 @@ def main(argv: list[str] | None = None) -> int:
                 agents_dir=args.agents_dir,
                 user_config=args.opencode_config,
                 skills_dir=args.skills_dir,
-                instructions_dir=args.instructions_dir,
                 opencode_args=opencode_args,
             )
         except NoSandboxError as exc:
@@ -213,7 +206,6 @@ def main(argv: list[str] | None = None) -> int:
             agents_dir=args.agents_dir,
             user_config=args.opencode_config,
             skills_dir=args.skills_dir,
-            instructions_dir=args.instructions_dir,
             host_web_port=args.web_port,
             opencode_args=opencode_args,
             detach=args.detach,
