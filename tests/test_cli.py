@@ -1,10 +1,13 @@
 from unittest.mock import patch
 
+import pytest
+
 from ocbox import cli
 from ocbox.cli import build_parser, main
 from ocbox.config import ConfigError
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError
+from ocbox.sandbox import NoSandboxError
 
 
 def test_parser_defaults() -> None:
@@ -131,3 +134,37 @@ def test_main_prints_a_notice_when_a_newer_release_exists(
 def test_main_prints_nothing_when_up_to_date(mock_preflight, mock_check, capsys) -> None:
     main([])
     assert "newer version" not in capsys.readouterr().err
+
+
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run_no_sandbox", return_value=0)
+def test_main_no_sandbox_skips_podman_preflight(mock_run_no_sandbox, mock_config) -> None:
+    with patch("ocbox.cli.run_preflight") as mock_preflight:
+        exit_code = main(["--no-sandbox"])
+    assert exit_code == 0
+    mock_preflight.assert_not_called()
+    mock_run_no_sandbox.assert_called_once()
+
+
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run_no_sandbox", return_value=0)
+def test_main_no_sandbox_forwards_opencode_args(mock_run_no_sandbox, mock_config) -> None:
+    main(["--no-sandbox", "--", "run", "hello"])
+    assert mock_run_no_sandbox.call_args.kwargs["opencode_args"] == ["run", "hello"]
+
+
+@pytest.mark.parametrize(
+    "flag", ["--tui", "--detach", "--web-port=1234", "--rebuild", "--apt", "--uv", "--yes"]
+)
+def test_main_rejects_no_sandbox_combined_with_sandbox_only_flags(flag, capsys) -> None:
+    exit_code = main(["--no-sandbox", flag])
+    assert exit_code == 1
+    assert "--no-sandbox" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run_no_sandbox", side_effect=NoSandboxError("~/.config/opencode/agents exists"))
+def test_main_reports_no_sandbox_error_cleanly(mock_run_no_sandbox, mock_config, capsys) -> None:
+    exit_code = main(["--no-sandbox"])
+    assert exit_code == 1
+    assert "ocbox: ~/.config/opencode/agents exists" in capsys.readouterr().err

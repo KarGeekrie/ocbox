@@ -187,6 +187,35 @@ directory is mounted, and the only network access is to your configured
 `LLM_HOST:LLM_PORT`, exactly as in web mode. Press whatever OpenCode's own
 quit key is (or close the terminal) to stop the sandbox.
 
+### Running without a sandbox
+
+`--no-sandbox` drops the whole point of ocbox - isolation - in exchange for
+convenience: it installs OpenCode if missing (the same official script the
+sandbox image uses, just run on this machine instead of during an image
+build) and wires up `opencode-config/`'s agents, skills and models, then
+runs plain `opencode` directly on the host, no Podman involved at all:
+
+```sh
+ocbox --no-sandbox              # bare opencode, agents/skills/models already wired up
+ocbox --no-sandbox -- run "..." # any OpenCode CLI form works - nothing is reserved
+```
+
+**Nothing is isolated in this mode**: no filesystem restriction (OpenCode can
+touch anything this user can), no network restriction (no relay, no
+`--network=none` - it talks to `LLM_HOST:LLM_PORT` directly). Use it when you
+trust what OpenCode is about to do and just want ocbox's install/config
+convenience without the container overhead; reach for the default web mode
+or `--tui` whenever that trust doesn't hold.
+
+Agents/skills/the model config are symlinked from `opencode-config/` (or
+your `--agents-dir`/`--skills-dir`/`--opencode-config` overrides) into
+OpenCode's real global config directory (`~/.config/opencode/`) - the host
+equivalent of the sandbox's read-only bind-mount. ocbox refuses to touch
+anything already there that isn't its own symlink, so a pre-existing global
+OpenCode config of your own is never silently replaced. Not compatible with
+`--tui`, `--detach`, `--web-port`, `--rebuild`, `--apt`/`--uv`, or `--yes` -
+all sandbox/image-specific and meaningless here.
+
 ### Passing arguments through to OpenCode
 
 Anything after a bare `--` goes to OpenCode itself, verbatim:
@@ -244,6 +273,7 @@ Useful flags:
 | `--opencode-config PATH` | OpenCode settings (models, theme, ...) instead of `~/.config/ocbox/opencode.jsonc` |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
 | `--detach` / `-d` | Background the sandbox so it survives closing the terminal (web mode only) |
+| `--no-sandbox` | Run OpenCode directly on the host - no Podman, no isolation at all |
 | `-- ARGS...` | Everything after `--` is forwarded to OpenCode itself |
 
 ## Default skills & agents

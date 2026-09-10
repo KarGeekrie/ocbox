@@ -91,8 +91,10 @@ def test_argv_includes_resource_limits_when_set() -> None:
     assert argv[argv.index("--pids-limit") + 1] == "256"
 
 
-def test_generate_opencode_config_points_at_container_llm_port() -> None:
-    cfg = _generate_opencode_config(8081)
+def test_generate_opencode_config_uses_the_given_base_url() -> None:
+    """base_url is the relay endpoint in sandbox mode, or LLM_HOST:LLM_PORT
+    directly in --no-sandbox mode - either way it's just passed through."""
+    cfg = _generate_opencode_config("http://127.0.0.1:8081/v1")
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 
 
@@ -100,7 +102,7 @@ def test_generate_opencode_config_generates_only_the_provider() -> None:
     """Everything else is a mounted file: agents and skills sit where OpenCode
     already looks, models come from the user's own opencode.jsonc. The relay
     endpoint is the only thing ocbox has to synthesise."""
-    cfg = _generate_opencode_config(8081)
+    cfg = _generate_opencode_config("http://127.0.0.1:8081/v1")
     assert set(cfg) == {"provider"}
 
 
@@ -108,7 +110,7 @@ def test_generate_opencode_config_uses_only_real_schema_keys() -> None:
     """OpenCode's schema is additionalProperties=false but its runtime drops
     unknown keys silently, so a typo here disables a feature with no error -
     which is exactly how `skillsDir`/`agents` went unnoticed."""
-    cfg = _generate_opencode_config(8081)
+    cfg = _generate_opencode_config("http://127.0.0.1:8081/v1")
     assert "skillsDir" not in cfg
     assert "agents" not in cfg
 

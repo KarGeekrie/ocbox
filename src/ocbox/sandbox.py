@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -223,14 +225,15 @@ def _resolve_user_config() -> Path:
     return image.repo_config_dir() / "opencode.jsonc"
 
 
-def _generate_opencode_config(container_llm_port: int) -> dict:
-    """Builds the single opencode.json ocbox mounts into every sandbox.
+def _generate_opencode_config(base_url: str) -> dict:
+    """Builds the single opencode.json ocbox feeds OpenCode, sandboxed or not.
 
     Only the provider is generated, because it is the only part ocbox owns:
-    the baseURL points at the relay bridging the container to the user's LLM.
-    Agents and skills aren't here - they're files mounted at the locations
+    `base_url` is the relay bridging a sandboxed container to the user's LLM,
+    or - in --no-sandbox mode - LLM_HOST:LLM_PORT directly, no relay involved.
+    Agents and skills aren't here - they're files placed at the locations
     OpenCode already searches - and the models belong to the user's own
-    opencode.jsonc, mounted as OpenCode's global config.
+    opencode.jsonc, layered in as OpenCode's global config.
 
     Key names verified against OpenCode's published schema
     (https://opencode.ai/config.json, checked at opencode 1.18.29). Getting one
@@ -245,7 +248,7 @@ def _generate_opencode_config(container_llm_port: int) -> dict:
         "provider": {
             "local": {
                 "npm": "@ai-sdk/openai-compatible",
-                "options": {"baseURL": f"http://127.0.0.1:{container_llm_port}/v1"},
+                "options": {"baseURL": base_url},
             }
         }
     }
@@ -316,7 +319,9 @@ def run(
 
     opencode_config_path = run_dir / "opencode.json"
     opencode_config_path.write_text(
-        json.dumps(_generate_opencode_config(container_llm_port), indent=2)
+        json.dumps(
+            _generate_opencode_config(f"http://127.0.0.1:{container_llm_port}/v1"), indent=2
+        )
     )
 
     container_name = f"ocbox-{slug}"
@@ -402,3 +407,114 @@ def run(
     finally:
         signal.signal(signal.SIGINT, old_handler)
         network.teardown_bridges(bridges)
+
+
+class NoSandboxError(Exception):
+    """Raised when --no-sandbox can't safely set up a bare OpenCode run."""
+
+
+OPENCODE_INSTALL_URL = "https://opencode.ai/install"
+
+
+def _find_or_install_opencode() -> str:
+    """Locates `opencode` on PATH, or installs it via the same official
+    script data/distros/*/Containerfile uses to build the sandbox image -
+    just run on the host instead of during an image build.
+    """
+    found = shutil.which("opencode")
+    if found:
+        return found
+    fallback = Path.home() / ".opencode" / "bin" / "opencode"
+    if fallback.exists():
+        return str(fallback)
+
+    print("ocbox: opencode not found - installing it...", file=sys.stderr)
+    curl = subprocess.run(
+        ["curl", "-fsSL", OPENCODE_INSTALL_URL], capture_output=True, check=True
+    )
+    # The installer assumes bash (`set -euo pipefail` on its own line 2) -
+    # piping into plain `sh` breaks wherever that's dash, e.g. Debian/Ubuntu.
+    subprocess.run(["bash"], input=curl.stdout, check=True)
+
+    found = shutil.which("opencode")
+    if found:
+        return found
+    if fallback.exists():
+        return str(fallback)
+    raise NoSandboxError(
+        "opencode installed but isn't on PATH and isn't at "
+        "~/.opencode/bin/opencode - add its install location to PATH and re-run."
+    )
+
+
+def _opencode_config_home() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return base / "opencode"
+
+
+def _link_into_opencode_config(name: str, source: Path) -> None:
+    """Symlinks OpenCode's real global `name` path at `source` - the host
+    equivalent of a sandboxed run's read-only bind-mount. Refuses to touch
+    anything that isn't already ocbox's own symlink, so a real pre-existing
+    agents/skills/opencode.jsonc is never silently replaced.
+    """
+    target = _opencode_config_home() / name
+    if target.is_symlink():
+        if target.resolve() == source.resolve():
+            return
+        target.unlink()
+    elif target.exists():
+        raise NoSandboxError(
+            f"{target} already exists and isn't managed by ocbox - move it "
+            "aside (or fold what you want into opencode-config/) before "
+            "using --no-sandbox, which needs to symlink it there."
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(source, target_is_directory=source.is_dir())
+
+
+def run_no_sandbox(
+    cfg: Config,
+    cwd: Path,
+    *,
+    agents_dir: Path | None = None,
+    skills_dir: Path | None = None,
+    user_config: Path | None = None,
+    opencode_args: list[str] | None = None,
+) -> int:
+    """Runs OpenCode directly on the host - no Podman, no isolation at all.
+
+    Trades ocbox's whole sandboxing story for convenience: it still installs
+    OpenCode if missing and wires up the same agents/skills/model config from
+    opencode-config/ (symlinked into OpenCode's real global config directory,
+    since there's no bind-mount to do it for us), but nothing here limits
+    what OpenCode can touch on this machine or reach over the network. Use
+    --tui or the default web mode for the actual sandbox.
+    """
+    opencode_bin = _find_or_install_opencode()
+
+    resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
+    resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
+    resolved_user_config = user_config or _resolve_user_config()
+
+    _link_into_opencode_config("agents", resolved_agents_dir)
+    _link_into_opencode_config("skills", resolved_skills_dir)
+    _link_into_opencode_config("opencode.jsonc", resolved_user_config)
+
+    slug = project.project_slug(cwd)
+    provider_config_path = project.runtime_dir(slug) / "opencode.json"
+    provider_config_path.write_text(
+        json.dumps(
+            _generate_opencode_config(f"http://{cfg.llm_host}:{cfg.llm_port}/v1"), indent=2
+        )
+    )
+
+    print(
+        "ocbox: running OpenCode directly on this machine - no sandbox, no "
+        "network isolation. Ctrl-C or OpenCode's own quit key to stop.\n"
+    )
+    env = os.environ.copy()
+    env["OPENCODE_CONFIG"] = str(provider_config_path)
+    os.execvpe(opencode_bin, [opencode_bin, *(opencode_args or [])], env)
+    return 0  # unreachable - execvpe replaces this process on success

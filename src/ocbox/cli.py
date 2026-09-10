@@ -8,7 +8,13 @@ from ocbox import project, update_check
 from ocbox.config import ConfigError, load_config
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError, run_preflight
-from ocbox.sandbox import OpencodeArgsError, check_opencode_args, run
+from ocbox.sandbox import (
+    NoSandboxError,
+    OpencodeArgsError,
+    check_opencode_args,
+    run,
+    run_no_sandbox,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
         "Web mode only. Track it with `podman ps`/`podman logs`/`podman stop` on the "
         "printed container name.",
     )
+    parser.add_argument(
+        "--no-sandbox",
+        action="store_true",
+        help="Run OpenCode directly on this machine instead of in a sandbox: no Podman, "
+        "no network isolation. Still installs OpenCode if missing and wires up "
+        "opencode-config/'s agents/skills/models. Not compatible with --tui/--detach/"
+        "--web-port/--rebuild/--apt/--uv/--yes, which are all sandbox-only.",
+    )
     return parser
 
 
@@ -97,11 +111,30 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    try:
-        check_opencode_args(opencode_args, mode="tui" if args.tui else "web")
-    except OpencodeArgsError as exc:
-        print(f"ocbox: {exc}", file=sys.stderr)
-        return 1
+    if args.no_sandbox:
+        sandbox_only = {
+            "--tui": args.tui,
+            "--detach": args.detach,
+            "--web-port": args.web_port is not None,
+            "--rebuild": args.rebuild,
+            "--apt": args.apt is not None,
+            "--uv": args.uv is not None,
+            "--yes": args.yes,
+        }
+        conflicts = [flag for flag, present in sandbox_only.items() if present]
+        if conflicts:
+            print(
+                f"ocbox: --no-sandbox can't be combined with {', '.join(conflicts)} - "
+                "there's no container/image for them to apply to",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        try:
+            check_opencode_args(opencode_args, mode="tui" if args.tui else "web")
+        except OpencodeArgsError as exc:
+            print(f"ocbox: {exc}", file=sys.stderr)
+            return 1
 
     latest = update_check.check_for_update(project.cache_dir())
     if latest:
@@ -111,17 +144,32 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    try:
-        run_preflight()
-    except PreflightError as exc:
-        print(f"ocbox: {exc}", file=sys.stderr)
-        return 1
+    if not args.no_sandbox:
+        try:
+            run_preflight()
+        except PreflightError as exc:
+            print(f"ocbox: {exc}", file=sys.stderr)
+            return 1
 
     try:
         cfg = load_config(explicit_path=args.config, project_dir=cwd)
     except ConfigError as exc:
         print(f"ocbox: {exc}", file=sys.stderr)
         return 1
+
+    if args.no_sandbox:
+        try:
+            return run_no_sandbox(
+                cfg,
+                cwd,
+                agents_dir=args.agents_dir,
+                user_config=args.opencode_config,
+                skills_dir=args.skills_dir,
+                opencode_args=opencode_args,
+            )
+        except NoSandboxError as exc:
+            print(f"ocbox: {exc}", file=sys.stderr)
+            return 1
 
     try:
         return run(
