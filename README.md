@@ -98,21 +98,6 @@ LLM_PORT = 11434           # e.g. Ollama's default port
 A project can override any of these by adding its own `ocbox.conf.py` in the
 project root.
 
-### Choosing the sandbox's OS
-
-`BASE_OS` picks which distro the sandbox image is built from: `"ubuntu"`
-(default, `ubuntu:24.04`), `"debian"` (`debian:bookworm-slim`), or `"rocky"`
-(`rockylinux:9`). An unrecognized value raises a clear error at startup
-rather than silently falling back to something.
-
-This changes which package manager `--apt`/`EXTRA_APT_DEFAULT` uses too -
-`apt` on Debian/Ubuntu, `dnf` on Rocky - so package names need to be valid
-for whichever distro you picked (e.g. `EXTRA_APT_DEFAULT = ["git"]` works
-unchanged across all three, but a Debian-specific package name won't exist
-on Rocky). Switching `BASE_OS` automatically triggers a rebuild the next
-time you run `ocbox`, the same way an ocbox upgrade does - see "Verified
-against real rootless Podman" below.
-
 ### Telling OpenCode which models you have
 
 `conf.py` says *where* your LLM server is; OpenCode also needs to know *what*
@@ -129,6 +114,11 @@ if you'd rather keep it out of the repo):
   "$schema": "https://opencode.ai/config.json",
   "provider": {
     "local": {
+      "options": {
+        // Only read in --no-sandbox mode - see below. Ignored (and safe to
+        // leave as a placeholder) in web/--tui, where ocbox controls it.
+        "baseURL": "http://<IP>:<PORT>/v1"
+      },
       "models": {
         // Key = the model id exactly as your server reports it
         // (`ollama list`, or curl http://<host>:<port>/v1/models).
@@ -151,6 +141,21 @@ below.)
 
 Check it landed with `opencode models` from inside a sandbox - you want to see
 `local/...` lines. `--opencode-config PATH` overrides the file per run.
+
+### Choosing the sandbox's OS
+
+`BASE_OS` picks which distro the sandbox image is built from: `"ubuntu"`
+(default, `ubuntu:24.04`), `"debian"` (`debian:bookworm-slim`), or `"rocky"`
+(`rockylinux:9`). An unrecognized value raises a clear error at startup
+rather than silently falling back to something.
+
+This changes which package manager `--apt`/`EXTRA_APT_DEFAULT` uses too -
+`apt` on Debian/Ubuntu, `dnf` on Rocky - so package names need to be valid
+for whichever distro you picked (e.g. `EXTRA_APT_DEFAULT = ["git"]` works
+unchanged across all three, but a Debian-specific package name won't exist
+on Rocky). Switching `BASE_OS` automatically triggers a rebuild the next
+time you run `ocbox`, the same way an ocbox upgrade does - see AGENTS.md's
+"Verification history" for how that's tested.
 
 ## Usage
 
@@ -349,69 +354,10 @@ two channels through Unix sockets bind-mounted from the host:
 No arbitrary destination is ever reachable from inside the sandbox, and no
 container-internal port is ever published directly to the host.
 
-## Verified against real OpenCode
-
-The details of OpenCode's CLI/config surface that ocbox depends on were
-originally best-effort guesses. All four have since been checked against
-opencode 1.18.29 and its published schema:
-
-- **`opencode.json` discovery**: `OPENCODE_CONFIG=<path>` is honoured - the
-  config ocbox mounts there shows up in `opencode debug config`.
-- **Skills/agents schema**: `skills` is an object (`paths`/`urls`), and
-  `agent` is an object keyed by agent name - neither is a list. Skills are
-  `<dir>/<name>/SKILL.md` with `name`/`description` frontmatter. Earlier
-  versions of ocbox emitted `skillsDir` and a list-valued `agents`, neither
-  of which exists; OpenCode dropped both silently, so the mounted skills and
-  agents never reached it.
-- **`opencode web` auto-opens a browser**: it spawns `xdg-open`, absent from
-  the sandbox image, for a container-internal URL that is meaningless on the
-  host. ocbox runs `opencode serve` instead - headless, byte-for-byte the
-  same UI - and prints the URL for you to open.
-- **Bare `opencode` is the TUI**: `opencode --help` lists it as the default
-  command, which is what `--tui` relies on.
-
-Worth knowing when changing any of this: OpenCode ignores config keys it
-doesn't recognise instead of rejecting them, so a wrong key name disables a
-feature with nothing in the output to say so. `opencode debug config` prints
-what actually survived, and `opencode debug skill` lists what was discovered.
-
-## Verified against real rootless Podman
-
-`tests/integration/test_end_to_end.py` runs `ocbox`'s actual sandboxing code
-(`sandbox.py`, `network.py`, the real `relay.py`/`entrypoint.sh`) against a
-real rootless Podman container - it swaps in a stand-in for the OpenCode
-binary itself (see `fixtures/fake_opencode.py`) since it doesn't assume
-network access to opencode.ai, but everything else is the genuine mechanism.
-Confirmed working this way:
-
-- `--network=none` really blocks arbitrary egress from inside the container.
-- The Unix-socket relay bridge correctly proxies both directions: the "LLM"
-  reachable from inside a network-isolated container, and the web UI
-  reachable from the host browser.
-- HTTP Basic Auth gating (`OPENCODE_SERVER_USERNAME`/`_PASSWORD`) actually
-  rejects missing/wrong credentials and accepts the right ones.
-- `--userns=keep-id` correctly maps container-written files in `/workspace`
-  to the invoking host user, not root or an arbitrary subuid.
-- `--tui` mode's real `entrypoint.sh` branch (exec straight into OpenCode, no
-  web relay/auth) runs correctly and can still reach the LLM relay from
-  inside the network-isolated container.
-- `BASE_OS` switching: selecting a different distro under the same image
-  tag correctly triggers a rebuild (verified for `debian`/`ubuntu`, whose
-  build mechanics are otherwise identical - `apt`, same Containerfile
-  shape); re-selecting the same distro doesn't rebuild. The `rocky`
-  Containerfile itself (the actual `dnf install` line) has **not** been
-  built against a real Rocky mirror - the dev sandbox this was validated in
-  had no route to dl.rockylinux.org. Verify it builds before relying on it.
-
-**Gotcha found along the way**: rootless `podman build` sets up build-time
-networking (via slirp4netns) by default even when the build itself does no
-networking, and that setup needs read/write access to `/dev/net/tun`. On a
-host (or nested container) where that device isn't accessible to your user,
-`podman build` fails outright - pass `network=False` to
-`PodmanClient.build()` for build phases that don't need network (as the
-test fixtures do), and expect the real `image.build_project_image()` /
-`image.ensure_base_image()` (which *do* need network for apt/uv/curl) to
-need `/dev/net/tun` access fixed at the host level instead.
+Curious what's actually been checked against real OpenCode and real rootless
+Podman, versus what's still a best-effort guess? See AGENTS.md's
+"Verification history" - contributor-facing detail moved out of this README
+to keep it focused on using ocbox rather than developing it.
 
 ## Scheduling runs
 

@@ -20,7 +20,7 @@
   // are unverified against OpenCode's published schema in this repo - check
   // `opencode debug config` after your first real run to confirm they
   // survived (OpenCode drops keys it doesn't recognise silently, without an
-  // error - see "Verified against real OpenCode" in the README).
+  // error - see AGENTS.md's "Verification history").
 
   "$schema": "https://opencode.ai/config.json",
   "lsp": true,

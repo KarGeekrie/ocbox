@@ -102,21 +102,87 @@ exactly how the integration tests were validated during initial development
   Containerfile - `containerfile_fingerprint()`/`ensure_base_image()` pick
   the rest up automatically. The `rocky` variant was written but never
   built against a real Rocky mirror (network-blocked in the dev sandbox
-  that validated this) - see the README's "Verified against real rootless
-  Podman" section before trusting it as-is.
+  that validated this) - see "Verification history" below before trusting
+  it as-is.
 - `data/entrypoint.sh` is POSIX `sh`, not bash - keep it that way (it runs
   inside a minimal container image). Test changes to it via the integration
   suite, not just `sh -n`.
 - The parts of OpenCode's CLI/config surface that ocbox depends on have been
-  verified against opencode 1.18.29 - see `README.md`'s "Verified against
-  real OpenCode" section for what was checked and how. Two things to know
-  before changing any of it: OpenCode's published schema is at
+  verified against opencode 1.18.29 - see "Verification history" below for
+  what was checked and how. Two things to know before changing any of it:
+  OpenCode's published schema is at
   <https://opencode.ai/config.json>, and it **ignores config keys it doesn't
   recognise** rather than rejecting them, so a wrong key name silently
   disables a feature instead of failing. Check with `opencode debug config`
   (what config survived) and `opencode debug skill` (what was discovered)
   from inside a sandbox, not by reading the code. If you introduce a new
   assumption you haven't checked that way, mark it and say so.
+
+## Verification history
+
+### Verified against real OpenCode
+
+The details of OpenCode's CLI/config surface that ocbox depends on were
+originally best-effort guesses. All four have since been checked against
+opencode 1.18.29 and its published schema:
+
+- **`opencode.json` discovery**: `OPENCODE_CONFIG=<path>` is honoured - the
+  config ocbox mounts there shows up in `opencode debug config`.
+- **Skills/agents schema**: `skills` is an object (`paths`/`urls`), and
+  `agent` is an object keyed by agent name - neither is a list. Skills are
+  `<dir>/<name>/SKILL.md` with `name`/`description` frontmatter. Earlier
+  versions of ocbox emitted `skillsDir` and a list-valued `agents`, neither
+  of which exists; OpenCode dropped both silently, so the mounted skills and
+  agents never reached it.
+- **`opencode web` auto-opens a browser**: it spawns `xdg-open`, absent from
+  the sandbox image, for a container-internal URL that is meaningless on the
+  host. ocbox runs `opencode serve` instead - headless, byte-for-byte the
+  same UI - and prints the URL for you to open.
+- **Bare `opencode` is the TUI**: `opencode --help` lists it as the default
+  command, which is what `--tui` relies on.
+
+Worth knowing when changing any of this: OpenCode ignores config keys it
+doesn't recognise instead of rejecting them, so a wrong key name disables a
+feature with nothing in the output to say so. `opencode debug config` prints
+what actually survived, and `opencode debug skill` lists what was discovered.
+
+### Verified against real rootless Podman
+
+`tests/integration/test_end_to_end.py` runs `ocbox`'s actual sandboxing code
+(`sandbox.py`, `network.py`, the real `relay.py`/`entrypoint.sh`) against a
+real rootless Podman container - it swaps in a stand-in for the OpenCode
+binary itself (see `fixtures/fake_opencode.py`) since it doesn't assume
+network access to opencode.ai, but everything else is the genuine mechanism.
+Confirmed working this way:
+
+- `--network=none` really blocks arbitrary egress from inside the container.
+- The Unix-socket relay bridge correctly proxies both directions: the "LLM"
+  reachable from inside a network-isolated container, and the web UI
+  reachable from the host browser.
+- HTTP Basic Auth gating (`OPENCODE_SERVER_USERNAME`/`_PASSWORD`) actually
+  rejects missing/wrong credentials and accepts the right ones.
+- `--userns=keep-id` correctly maps container-written files in `/workspace`
+  to the invoking host user, not root or an arbitrary subuid.
+- `--tui` mode's real `entrypoint.sh` branch (exec straight into OpenCode, no
+  web relay/auth) runs correctly and can still reach the LLM relay from
+  inside the network-isolated container.
+- `BASE_OS` switching: selecting a different distro under the same image
+  tag correctly triggers a rebuild (verified for `debian`/`ubuntu`, whose
+  build mechanics are otherwise identical - `apt`, same Containerfile
+  shape); re-selecting the same distro doesn't rebuild. The `rocky`
+  Containerfile itself (the actual `dnf install` line) has **not** been
+  built against a real Rocky mirror - the dev sandbox this was validated in
+  had no route to dl.rockylinux.org. Verify it builds before relying on it.
+
+**Gotcha found along the way**: rootless `podman build` sets up build-time
+networking (via slirp4netns) by default even when the build itself does no
+networking, and that setup needs read/write access to `/dev/net/tun`. On a
+host (or nested container) where that device isn't accessible to your user,
+`podman build` fails outright - pass `network=False` to
+`PodmanClient.build()` for build phases that don't need network (as the
+test fixtures do), and expect the real `image.build_project_image()` /
+`image.ensure_base_image()` (which *do* need network for apt/uv/curl) to
+need `/dev/net/tun` access fixed at the host level instead.
 
 ## Git / PR conventions
 
