@@ -5,6 +5,7 @@ import pytest
 from ocbox import sandbox
 from ocbox.sandbox import (
     AGENTS_DIR_MOUNT,
+    INSTRUCTIONS_DIR_MOUNT,
     SKILLS_DIR_MOUNT,
     USER_CONFIG_MOUNT,
     RunPlan,
@@ -23,6 +24,7 @@ def _plan(**overrides) -> RunPlan:
         "agents_dir": Path("/pkg/data/agents"),
         "user_config": Path("/pkg/data/opencode.jsonc"),
         "skills_dir": Path("/pkg/data/skills"),
+        "instructions_dir": Path("/pkg/data/instructions"),
         "data_volume": "ocbox-home-myproj",
         "container_name": "ocbox-myproj",
         "container_web_port": 4096,
@@ -130,6 +132,25 @@ def test_argv_mounts_skills_dir_after_the_home_volume_it_nests_in() -> None:
     assert home_volume < skills
 
 
+def test_argv_mounts_instructions_dir_at_opencode_discovery_path() -> None:
+    """Same mechanism as agents/skills: mounted at a fixed location, though
+    unlike them, OpenCode is believed to also need instructions.jsonc's own
+    `instructions` array to point at it - see opencode-config/instructions/
+    README.md."""
+    argv = build_podman_run_argv(_plan(instructions_dir=Path("/pkg/data/instructions")))
+    assert f"/pkg/data/instructions:{INSTRUCTIONS_DIR_MOUNT}:ro" in argv
+    assert INSTRUCTIONS_DIR_MOUNT == "/home/ocbox/.config/opencode/instructions"
+
+
+def test_argv_mounts_instructions_dir_after_the_home_volume_it_nests_in() -> None:
+    argv = build_podman_run_argv(_plan())
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    instructions = next(
+        i for i, a in enumerate(argv) if a.endswith(f":{INSTRUCTIONS_DIR_MOUNT}:ro")
+    )
+    assert home_volume < instructions
+
+
 def test_argv_mounts_user_config_as_opencode_global_config() -> None:
     """Mounted at OpenCode's *global* config path on purpose: global ranks
     below OPENCODE_CONFIG, so ocbox keeps control of the provider endpoint
@@ -206,6 +227,7 @@ def test_argv_tui_mode_still_mounts_workspace_and_config() -> None:
     assert "/home/user/myproj" in sources
     assert "/pkg/data/agents" in sources
     assert "/pkg/data/skills" in sources
+    assert "/pkg/data/instructions" in sources
 
 
 def test_resolve_user_config_prefers_the_users_file(tmp_path, monkeypatch) -> None:

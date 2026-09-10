@@ -124,6 +124,7 @@ def mocked_no_sandbox_env(tmp_path, monkeypatch):
     repo_config = tmp_path / "opencode-config"
     (repo_config / "agents").mkdir(parents=True)
     (repo_config / "skills").mkdir(parents=True)
+    (repo_config / "instructions").mkdir(parents=True)
     (repo_config / "opencode.jsonc").write_text('{"provider": {"local": {}}}')
 
     with (
@@ -165,7 +166,7 @@ def test_run_no_sandbox_strips_a_stale_inherited_opencode_config_env(
     assert "OPENCODE_CONFIG" not in env
 
 
-def test_run_no_sandbox_links_agents_skills_and_jsonc_from_repo_config(
+def test_run_no_sandbox_links_agents_skills_instructions_and_jsonc_from_repo_config(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
     sandbox.run_no_sandbox()
@@ -174,6 +175,7 @@ def test_run_no_sandbox_links_agents_skills_and_jsonc_from_repo_config(
     repo_config = mocked_no_sandbox_env["repo_config"]
     assert (config_home / "agents").resolve() == (repo_config / "agents").resolve()
     assert (config_home / "skills").resolve() == (repo_config / "skills").resolve()
+    assert (config_home / "instructions").resolve() == (repo_config / "instructions").resolve()
     assert (config_home / "opencode.jsonc").resolve() == (repo_config / "opencode.jsonc").resolve()
 
 
@@ -187,6 +189,16 @@ def test_run_no_sandbox_honors_agents_and_skills_dir_overrides(
 
     config_home = tmp_path / "config" / "opencode"
     assert (config_home / "agents").resolve() == custom_agents.resolve()
+
+
+def test_run_no_sandbox_honors_instructions_dir_override(tmp_path, mocked_no_sandbox_env) -> None:
+    custom_instructions = tmp_path / "my-instructions"
+    custom_instructions.mkdir()
+
+    sandbox.run_no_sandbox(instructions_dir=custom_instructions)
+
+    config_home = tmp_path / "config" / "opencode"
+    assert (config_home / "instructions").resolve() == custom_instructions.resolve()
 
 
 def test_run_no_sandbox_propagates_link_errors_as_no_sandbox_error(

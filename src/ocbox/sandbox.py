@@ -38,6 +38,15 @@ USER_CONFIG_MOUNT = "/home/ocbox/.config/opencode/opencode.jsonc"
 # generated config holding only the thing ocbox actually owns - the relay
 # endpoint. Also nests inside /home/ocbox, so it mounts after the volume.
 SKILLS_DIR_MOUNT = "/home/ocbox/.config/opencode/skills"
+# UNVERIFIED (see AGENTS.md "Verification history"): unlike agents/skills,
+# OpenCode's `instructions` config key is (believed to be) not auto-discovered
+# from a fixed directory - it has to be listed explicitly, as glob patterns,
+# in opencode.jsonc's own `instructions` array. Mounted here anyway, at the
+# same sibling-of-the-config-file layout as agents/skills, so a *relative*
+# glob in opencode.jsonc (e.g. "instructions/*.md") resolves the same way
+# whether opencode.jsonc's own precedence-driven copy is this mount or, in
+# --no-sandbox mode, the real ~/.config/opencode/opencode.jsonc symlink.
+INSTRUCTIONS_DIR_MOUNT = "/home/ocbox/.config/opencode/instructions"
 
 
 @dataclass
@@ -48,6 +57,7 @@ class RunPlan:
     opencode_config: Path
     agents_dir: Path
     skills_dir: Path
+    instructions_dir: Path
     user_config: Path
     data_volume: str
     container_name: str
@@ -106,6 +116,8 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         f"{plan.agents_dir}:{AGENTS_DIR_MOUNT}:ro",
         "-v",
         f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
+        "-v",
+        f"{plan.instructions_dir}:{INSTRUCTIONS_DIR_MOUNT}:ro",
         "-v",
         f"{plan.user_config}:{USER_CONFIG_MOUNT}:ro",
     ]
@@ -265,6 +277,7 @@ def run(
     cli_uv: list[str] | None = None,
     agents_dir: Path | None = None,
     skills_dir: Path | None = None,
+    instructions_dir: Path | None = None,
     user_config: Path | None = None,
     opencode_args: list[str] | None = None,
     host_web_port: int | None = None,
@@ -315,6 +328,7 @@ def run(
     container_web_port = cfg.container_web_port
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
+    resolved_instructions_dir = instructions_dir or (image.repo_config_dir() / "instructions")
     resolved_user_config = user_config or _resolve_user_config()
 
     opencode_config_path = run_dir / "opencode.json"
@@ -337,6 +351,7 @@ def run(
         user_config=resolved_user_config,
         opencode_args=list(opencode_args or []),
         skills_dir=resolved_skills_dir,
+        instructions_dir=resolved_instructions_dir,
         data_volume=data_volume,
         container_name=container_name,
         container_web_port=container_web_port,
@@ -478,6 +493,7 @@ def run_no_sandbox(
     *,
     agents_dir: Path | None = None,
     skills_dir: Path | None = None,
+    instructions_dir: Path | None = None,
     user_config: Path | None = None,
     opencode_args: list[str] | None = None,
 ) -> int:
@@ -499,10 +515,12 @@ def run_no_sandbox(
 
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
+    resolved_instructions_dir = instructions_dir or (image.repo_config_dir() / "instructions")
     resolved_user_config = user_config or _resolve_user_config()
 
     _link_into_opencode_config("agents", resolved_agents_dir)
     _link_into_opencode_config("skills", resolved_skills_dir)
+    _link_into_opencode_config("instructions", resolved_instructions_dir)
     _link_into_opencode_config("opencode.jsonc", resolved_user_config)
 
     print(

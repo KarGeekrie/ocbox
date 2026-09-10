@@ -214,12 +214,13 @@ touch anything this user can), no network restriction (no relay, no
 just want ocbox's install/config convenience without the container overhead;
 reach for the default web mode or `--tui` whenever that trust doesn't hold.
 
-Agents/skills/the model config are symlinked from `opencode-config/` (or
-your `--agents-dir`/`--skills-dir`/`--opencode-config` overrides) into
-OpenCode's real global config directory (`~/.config/opencode/`) - the host
-equivalent of the sandbox's read-only bind-mount. ocbox refuses to touch
-anything already there that isn't its own symlink, so a pre-existing global
-OpenCode config of your own is never silently replaced.
+Agents/skills/instructions/the model config are symlinked from
+`opencode-config/` (or your `--agents-dir`/`--skills-dir`/
+`--instructions-dir`/`--opencode-config` overrides) into OpenCode's real
+global config directory (`~/.config/opencode/`) - the host equivalent of the
+sandbox's read-only bind-mount. ocbox refuses to touch anything already
+there that isn't its own symlink, so a pre-existing global OpenCode config
+of your own is never silently replaced.
 
 **No `conf.py` needed for this mode.** Unlike web/`--tui`, ocbox generates no
 provider override here - there's no relay to point at, so
@@ -287,27 +288,28 @@ Useful flags:
 | `--apt PKG...` / `--uv PKG...` | Set extra packages non-interactively |
 | `--rebuild` | Force a rebuild of the project's sandbox image |
 | `--web-port PORT` | Pin the host port for the web UI (ignored with `--tui`) |
-| `--agents-dir PATH` / `--skills-dir PATH` | Use custom agents/skills instead of the packaged defaults |
+| `--agents-dir PATH` / `--skills-dir PATH` / `--instructions-dir PATH` | Use custom agents/skills/instructions instead of the packaged defaults |
 | `--opencode-config PATH` | OpenCode settings (models, theme, ...) instead of `~/.config/ocbox/opencode.jsonc` |
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
 | `--detach` / `-d` | Background the sandbox so it survives closing the terminal (web mode only) |
 | `--no-sandbox` | Run OpenCode directly on the host - no Podman, no isolation at all |
 | `-- ARGS...` | Everything after `--` is forwarded to OpenCode itself |
 
-## Default skills & agents
+## Default skills, agents & instructions
 
 `opencode-config/` at the repo root - not buried under `src/` - holds
-everything you want available in every sandbox: `agents/` and `skills/`
-instead of reconfiguring OpenCode per project, plus the `opencode.jsonc`
-described above (`~/.config/ocbox/opencode.jsonc` still takes priority over
-it when present). It's meant to be edited directly in your clone: `git clone`,
-drop in your own agents/skills and models, `ocbox` picks them up from there -
-no separate install step. Point `--agents-dir`/`--skills-dir` at other
-directories to override per invocation instead.
+everything you want available in every sandbox: `agents/`, `skills/`, and
+`instructions/`, instead of reconfiguring OpenCode per project, plus the
+`opencode.jsonc` described above (`~/.config/ocbox/opencode.jsonc` still
+takes priority over it when present). It's meant to be edited directly in
+your clone: `git clone`, drop in your own agents/skills/instructions and
+models, `ocbox` picks them up from there - no separate install step. Point
+`--agents-dir`/`--skills-dir`/`--instructions-dir` at other directories to
+override per invocation instead.
 
-Both are found because of *where* they are mounted - OpenCode's own global
-config directory - rather than through any config key, so the `opencode.json`
-ocbox generates holds nothing but the provider endpoint:
+Agents and skills are found because of *where* they are mounted - OpenCode's
+own global config directory - rather than through any config key, so the
+`opencode.json` ocbox generates holds nothing but the provider endpoint:
 
 - **Agents**: one `<name>.md` per agent, with `description`/`mode`
   frontmatter and the body as its prompt. Mounted at
@@ -318,6 +320,15 @@ ocbox generates holds nothing but the provider endpoint:
   `~/.config/opencode/skills`, the documented location for global skills, so
   the same mechanism as agents - no config key involved. See
   `opencode-config/skills/README.md`.
+- **Instructions** *(unverified - see AGENTS.md's "Verification history")*:
+  plain `.md` files with no frontmatter, believed to be added to every
+  session's context unconditionally, unlike a skill (loaded on demand) or an
+  agent (a selectable persona). Unlike agents/skills, mounting the directory
+  alone isn't believed to be enough - `opencode-config/opencode.jsonc`
+  already lists it via `"instructions": ["instructions/*.md"]`. Use it for
+  standing rules, e.g. "always use a Python venv, ask before creating one" -
+  see `opencode-config/instructions/python-venv.md` for a working example.
+  See `opencode-config/instructions/README.md`.
 
 ocbox ships four agents: `chat` (discussion only - editing *and* bash denied,
 since denying edits alone still leaves `echo x > file`), `review` (finds bugs;
@@ -332,7 +343,8 @@ Check them with `opencode agent list` and `opencode debug skill` from inside a
 sandbox, and the generated config with `opencode debug config`. OpenCode
 ignores config keys and agent files it doesn't recognise without complaining,
 so a mistake shows up as a feature that quietly does nothing rather than an
-error.
+error - the reason instructions above is marked unverified rather than
+asserted as working.
 
 ## How the isolation works
 

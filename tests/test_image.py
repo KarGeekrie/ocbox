@@ -43,10 +43,11 @@ def test_repo_config_dir_points_at_the_repo_root_directory() -> None:
     assert (path.parent / "pyproject.toml").is_file()
 
 
-def test_repo_config_dir_holds_agents_skills_and_the_default_jsonc() -> None:
+def test_repo_config_dir_holds_agents_skills_instructions_and_the_default_jsonc() -> None:
     path = image.repo_config_dir()
     assert (path / "agents").is_dir()
     assert (path / "skills").is_dir()
+    assert (path / "instructions").is_dir()
     assert (path / "opencode.jsonc").is_file()
 
 
