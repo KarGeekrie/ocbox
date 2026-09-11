@@ -34,15 +34,16 @@ The body: instructions, examples, whatever the skill needs.
 - Skill names must be unique across every location OpenCode searches.
 
 This directory is bind-mounted read-only into every sandbox at
-`~/.config/opencode/skills`, the documented location for global skills
+`~/.config/opencode/skills` (with `--no-sandbox`, it is linked into the config
+directory ocbox hands OpenCode), the documented location for global skills
 (<https://opencode.ai/docs/skills/>), which is why they load without any
 `skills.paths` entry in the generated config. Agents work the same way, from
 `../agents/`.
 
 Skills are loaded on demand: agents see the list of names and descriptions and
 pull in the full body through the native `skill` tool when they need it.
-Access can be gated per pattern with `permission.skill` in your own
-`~/.config/ocbox/opencode.jsonc`, or the tool disabled per agent with
+Access can be gated per pattern with `permission.skill` in
+`opencode-config/opencode.jsonc`, or the tool disabled per agent with
 `tools: {skill: false}`.
 
 Verified against opencode 1.18.29: a probe skill placed here shows up in

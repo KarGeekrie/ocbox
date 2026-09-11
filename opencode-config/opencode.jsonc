@@ -13,11 +13,10 @@
   // config, and in --no-sandbox mode placed in the config directory ocbox
   // hands OpenCode through OPENCODE_CONFIG_DIR.
   //
-  // provider.local.options.baseURL depends on the mode:
-  //   - web/--tui (sandboxed): ocbox overrides it to point at the relay
-  //     reaching the LLM - the value here is ignored.
-  //   - --no-sandbox: used as-is, so it must be the LLM server's real,
-  //     directly-reachable address.
+  // provider.local.options.baseURL is where the LLM server is, and it is read
+  // in every mode: inside a sandbox it tells ocbox's relay what to dial (OpenCode
+  // is pointed at the relay instead); with --no-sandbox OpenCode connects to it
+  // directly. It must be plain http for the sandbox relay.
   //
   // Verified against opencode 1.18.29: every key below survives
   // `opencode debug config`. OpenCode drops keys it doesn't recognise
@@ -52,7 +51,9 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "ai-lpec (local)",
       "options": {
-        "baseURL": "http://<IP>:<PORT>/v1"
+        // Example: a local Ollama. Replace with the team's LLM server - see the
+        // README's TODO.
+        "baseURL": "http://127.0.0.1:11434/v1"
       },
       "models": {
         "Qwen3.8-27B-smart": {

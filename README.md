@@ -83,14 +83,11 @@ every mode: the team's agents, skills, rules (`AGENTS.md`) and model list
 than a general-purpose package, so that directory arrives already filled in -
 see "Default skills & agents" below for what's in it.
 
-Create `~/.config/ocbox/conf.py`:
+Nothing else is required. Machine-specific settings go in an optional
+`~/.config/ocbox/conf.py`, where every setting has a default:
 
 ```python
-# ~/.config/ocbox/conf.py
-LLM_HOST = "127.0.0.1"
-LLM_PORT = 11434           # e.g. Ollama's default port
-
-# Optional overrides (defaults shown):
+# ~/.config/ocbox/conf.py - optional; defaults shown
 # BASE_OS = "ubuntu"             # or "debian", "rocky"
 # BASE_IMAGE = "ocbox/base:latest"
 # CONTAINER_WEB_PORT = 4096
@@ -101,8 +98,11 @@ LLM_PORT = 11434           # e.g. Ollama's default port
 # PIDS_LIMIT = None             # e.g. 512
 ```
 
-A project can override any of these by adding its own `ocbox.conf.py` in the
-project root.
+A project can override any of these with its own `ocbox.conf.py` at its root.
+The LLM's address doesn't belong in either: it is the `baseURL` in
+`opencode-config/opencode.jsonc` (see below). A `conf.py` that still sets
+`LLM_HOST` or `LLM_PORT` is rejected with an error pointing there, rather than
+silently ignored.
 
 ### The team's OpenCode configuration
 
@@ -116,11 +116,14 @@ In every mode - web, `--tui` or `--no-sandbox` - ocbox hands this file to
 OpenCode; there is no other copy to keep in sync. `--opencode-config PATH`
 substitutes another file for a single run.
 
-`conf.py` and this file both mention the LLM, for different reasons: `conf.py`
-says *where* the server is, so ocbox can run the relay a sandbox reaches it
-through; `opencode.jsonc` tells OpenCode *what* it serves. Inside a sandbox,
-ocbox overrides the file's `baseURL` to point at that relay; with
-`--no-sandbox` the `baseURL` is used as written.
+This file is also where the LLM server's address lives -
+`provider.local.options.baseURL` - and every mode reads it. Inside a sandbox,
+ocbox makes that address the destination of the relay the sandbox reaches the
+LLM through, and points OpenCode at the relay; with `--no-sandbox`, OpenCode
+connects to the address directly. It has to be plain `http` for the relay: an
+`https` address is refused with an explanation, since OpenCode sees the relay at
+`http://127.0.0.1` and no certificate could match that. The value shipped is a
+local Ollama, as an example - see "TODO".
 
 To check it landed, run `opencode models` inside a sandbox - you should see
 `local/...` lines.
@@ -202,8 +205,8 @@ This launches OpenCode's interactive terminal UI directly in your current
 terminal instead of starting the web server - no port is forwarded, no auth
 token is generated (there's nothing exposed to the host network to protect),
 but the same filesystem/network sandboxing applies: only your project
-directory is mounted, and the only network access is to your configured
-`LLM_HOST:LLM_PORT`, exactly as in web mode. Press whatever OpenCode's own
+directory is mounted, and the only network access is to the LLM named in
+`opencode.jsonc`, exactly as in web mode. Press whatever OpenCode's own
 quit key is (or close the terminal) to stop the sandbox.
 
 ### Running without a sandbox
@@ -223,33 +226,39 @@ any network.
 
 What ocbox does, checked end to end on a host after `opencode uninstall`:
 
-- **OpenCode already installed** (on `PATH` or in `~/.opencode/bin`): nothing
-  is installed.
+- **OpenCode already installed** (on `PATH`, in `~/.opencode/bin`, or already in
+  this checkout's `.ocbox/bin/`): nothing is installed.
 - **OpenCode missing**: ocbox runs OpenCode's standard install script, which
-  fetches the latest release into `~/.opencode/bin` - so the host's version
-  can be newer than the sandbox image's. The one departure from a standard
-  install is `--no-modify-path`: your shell rc files are left alone, and ocbox
-  finds the binary itself.
+  fetches the latest release - so the host's version can be newer than the
+  sandbox image's - but installs it inside this checkout, in the gitignored
+  `.ocbox/bin/`, rather than in `~/.opencode/bin`, and leaves your shell rc
+  files alone. `opencode` therefore isn't on your shell's `PATH`; ocbox runs it
+  from `.ocbox/bin/`.
 - **Either way, the team's configuration is loaded**: ocbox assembles
-  `opencode-config/`'s agents, skills, `AGENTS.md` and `opencode.jsonc` (or the
-  `--agents-dir`/`--skills-dir`/`--opencode-config` overrides) in its own state
-  directory and points OpenCode at it with `OPENCODE_CONFIG_DIR`. ocbox itself
-  writes nothing into your OpenCode configuration.
+  `opencode-config/`'s agents, skills and `opencode.jsonc` (or the
+  `--agents-dir`/`--skills-dir`/`--opencode-config` overrides), plus the
+  `AGENTS.md` composed for this mode, in `.ocbox/no-sandbox/`, and points
+  OpenCode at it with `OPENCODE_CONFIG_DIR`. Everything ocbox writes for this
+  mode stays inside the checkout.
 
 A detail worth knowing: on the host, OpenCode behaves like any standard
-OpenCode installation, with side effects a sandbox doesn't have. It creates
-`~/.config/opencode/`, and once a session runs it installs its plugin SDK there
-(`@opencode-ai/plugin`, about 63 MB). It also still reads that directory: a
-personal `opencode.jsonc` or `agents/` there merges with the team's - the
-team's value wins where both set the same key - while a personal `AGENTS.md`
-is replaced by the team's. So in this mode, behaviour isn't guaranteed to be
-identical for everyone on the team.
+OpenCode installation, with side effects a sandbox doesn't have. It creates its
+usual directories under your home - `~/.config/opencode/`,
+`~/.local/share/opencode/` and `~/.cache/opencode/` - and once a session runs it
+installs its plugin SDK (`@opencode-ai/plugin`, about 63 MB) in
+`~/.config/opencode/`. It also still reads `~/.config/opencode/`: a personal
+`opencode.jsonc` or `agents/` there merges with the team's - the team's value
+wins where both set the same key - while a personal `AGENTS.md` is replaced by
+the one ocbox composes for this mode. So in this mode, behaviour isn't
+guaranteed to be identical for everyone on the team.
 
-**No `conf.py` needed.** There is no relay to point OpenCode at, so the
-`baseURL` in `opencode-config/opencode.jsonc` is used as written and must name
-the real LLM server - see "TODO" at the end. `conf.py`'s `LLM_HOST`/`LLM_PORT`
-stay required for the sandboxed modes: the relay must be listening before
-OpenCode reads its configuration, so ocbox needs those values upfront.
+One more thing to expect: on the host, OpenCode's own startup occasionally
+stalls for minutes before answering, whether ocbox launched it or not - see
+AGENTS.md's "Verification history". No sandboxed run has shown it.
+
+**No relay in this mode**: OpenCode connects straight to the `baseURL` in
+`opencode-config/opencode.jsonc`, so that address has to be reachable from the
+host - see "TODO" at the end.
 
 Not compatible with `--tui`, `--detach`, `--web-port`, `--rebuild`,
 `--apt`/`--uv`, `--yes`, `--config` or `--mount` - all sandbox-specific.
@@ -345,8 +354,20 @@ rather than letting one replace the other:
 
 | Layer | File | Holds | Changed by |
 |---|---|---|---|
-| Team | `opencode-config/AGENTS.md` in this repo, loaded as OpenCode's global `AGENTS.md` | Rules for every project | A commit to this repository |
+| Team | `opencode-config/AGENTS.md`, sent within the global `AGENTS.md` ocbox composes | Rules for every project | A commit to this repository |
 | Project | `AGENTS.md` at the project root, written by `/init` | This codebase's commands, architecture, conventions | A commit to that project |
+
+The global half isn't one file ocbox ships: it is composed for every run, from
+three parts in this order -
+
+1. **Where the agent runs**, from `opencode-config/environments/`: `sandbox.md`
+   in web and `--tui` mode, `no-sandbox.md` with `--no-sandbox`. Only the current
+   mode's is sent, so an agent on your own machine is never told it is
+   sandboxed, or the other way round.
+2. **What this sandbox has** - sandboxed modes only, generated by ocbox: whether
+   the container has a network, its base distribution, the extra `apt` and `uv`
+   packages it was built with, and the project directories mounted into it.
+3. **The team rules**, from `opencode-config/AGENTS.md`, the same in every mode.
 
 How the two layers interact:
 
@@ -458,20 +479,15 @@ own global config directory - rather than through any config key, so the
   `~/.config/opencode/skills`, the documented location for global skills, so
   the same mechanism as agents - no config key involved. See
   `opencode-config/skills/README.md`, and "Workflow" step 3 for an example.
-- **Team rules**: `AGENTS.md`, mounted as OpenCode's *global*
-  `~/.config/opencode/AGENTS.md`; how it combines with a project's own is in
-  "Workflow" step 1. ocbox skips the mount if the file is ever removed.
+- **Team rules and environments**: `AGENTS.md` and `environments/`, which ocbox
+  composes into the global `AGENTS.md` for each run - see "Workflow" step 1.
 
-ocbox ships four agents: `chat` (discussion only - editing *and* bash denied,
-since denying edits alone still leaves `echo x > file`), `review` (finds bugs;
-editing denied, bash gated on your approval so `git diff` still works), plus
-`build` and `plan`, which override OpenCode's built-ins of the same name to
-add the sandbox's constraints - no network, only `/workspace` writable - to
-their prompts. Overriding is a merge, and permissions merge per key, so plan
-mode's built-in edit denial survives untouched. All four deny `webfetch`:
-there is no network, so it can only fail. Those prompts describe the sandbox,
-so under `--no-sandbox` `build` and `plan` overstate the restrictions - the
-host has a network and more than `/workspace` - while `webfetch` stays denied.
+ocbox adds two agents next to OpenCode's built-in `build` and `plan`, which it
+leaves exactly as OpenCode ships them: `chat` (discussion only - editing *and*
+bash denied, since denying edits alone still leaves `echo x > file`) and
+`review` (finds bugs; editing denied, bash gated on your approval so `git diff`
+still works). Both deny `webfetch`. Their prompts describe a role only; where
+they run comes from the composed `AGENTS.md`.
 
 Check them with `opencode agent list` and `opencode debug skill` from inside a
 sandbox, and the generated config with `opencode debug config`. OpenCode
@@ -487,8 +503,8 @@ container with `--network=none` (a kernel-level guarantee: no network device
 beyond loopback exists in the container's netns at all) and bridges exactly
 two channels through Unix sockets bind-mounted from the host:
 
-- **LLM egress**: a host-side relay listens on a Unix socket and dials your
-  configured `LLM_HOST:LLM_PORT`; a matching relay inside the container turns
+- **LLM egress**: a host-side relay listens on a Unix socket and dials the host
+  and port of the `baseURL` in `opencode.jsonc`; a matching relay inside the container turns
   that socket back into a local TCP port OpenCode talks to as if it were any
   ordinary HTTP endpoint.
 - **Web UI ingress**: the same pattern in reverse - OpenCode's web server
@@ -541,8 +557,7 @@ ruff check src tests
 
 ## TODO
 
-- [ ] Fill in `provider.local.options.baseURL` in
-  `opencode-config/opencode.jsonc` - it still reads `http://<IP>:<PORT>/v1`.
-  The sandboxed modes don't read it (ocbox points OpenCode at its relay), but
-  `--no-sandbox` uses it as written and can't reach the LLM until it names the
-  real server.
+- [ ] Set `provider.local.options.baseURL` in `opencode-config/opencode.jsonc` to
+  the team's LLM server - it still holds the example local Ollama,
+  `http://127.0.0.1:11434/v1`. Every mode reads it: a sandbox's relay connects
+  there, and OpenCode connects there directly under `--no-sandbox`.

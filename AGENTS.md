@@ -11,9 +11,10 @@ directory - either through OpenCode's web UI (default) or its terminal UI
 overview; read it before making changes, it explains the isolation design
 in depth.
 
-Don't confuse this repo-level `AGENTS.md` with `opencode-config/agents/` -
-that directory holds *runtime* agent definitions ocbox mounts into the
-sandboxes it creates, for OpenCode itself. They're unrelated.
+Don't confuse this repo-level `AGENTS.md` with `opencode-config/AGENTS.md`,
+`opencode-config/environments/` or `opencode-config/agents/` - those are
+*runtime* content ocbox hands to OpenCode itself, in every sandbox and under
+`--no-sandbox`. They're unrelated to this file.
 
 ## Setup
 
@@ -85,7 +86,24 @@ exactly how the integration tests were validated during initial development
   relay processes bridging exactly the local LLM (egress) and the web UI
   (ingress, web mode only). Don't add any other network path without a
   deliberate design discussion - the whole point of this project is that
-  nothing else is reachable.
+  nothing else is reachable. The egress relay's destination is the host and
+  port of `provider.local.options.baseURL` in `opencode-config/opencode.jsonc`
+  (`sandbox.llm_endpoint()`, parsed with the stdlib-only `jsonc.py`): that file
+  is the one place the LLM's address is written, and `conf.py` rejects the old
+  `LLM_HOST`/`LLM_PORT` rather than ignoring them.
+- The global `AGENTS.md` an agent receives is composed per run by
+  `sandbox._compose_global_agents_md()`: `opencode-config/environments/<mode>.md`,
+  then - sandboxed modes only - facts generated from the actual run (network
+  mode from `SANDBOX_NETWORK`, the same constant the podman argv uses; distro;
+  extra apt/uv packages; mounts), then the team rules in
+  `opencode-config/AGENTS.md`. Agent prompts in `opencode-config/agents/` must
+  describe a role only, never an environment: that is how `chat`/`review` once
+  told agents on the host they were sandboxed. OpenCode's built-in `build` and
+  `plan` are deliberately not overridden.
+- `--no-sandbox` keeps what ocbox writes inside the checkout, in the gitignored
+  `.ocbox/` (`image.repo_local_dir()`): the config directory it assembles, and
+  an OpenCode binary it installs when none exists on `PATH` or in
+  `~/.opencode/bin`.
 - `image.py` builds and caches sandbox images, with a content-hash `LABEL`
   on the base image so an ocbox upgrade (changed `Containerfile`/`relay.py`/
   `entrypoint.sh`) triggers a rebuild instead of silently reusing a stale
@@ -159,14 +177,15 @@ opencode 1.18.29 and its published schema:
   category" means `AGENTS.md` beats `CLAUDE.md` *in the same location*, not
   that a project file shadows the global one - the V2 docs say it outright:
   "OpenCode combines the files and does not resolve conflicts between them".
-  ocbox ships the team's global file as `opencode-config/AGENTS.md`.
+  ocbox composes that global file per mode - see "Architecture pointers".
 - **`OPENCODE_CONFIG_DIR`**, which the whole of `--no-sandbox`'s config wiring
   rests on: agents, skills and `opencode.jsonc` all load from a directory given
   this way, a config layered over it with `OPENCODE_CONFIG` merges rather than
   replacing it, and an `AGENTS.md` inside it is sent as the global one (same
   request-recording check). OpenCode also writes into that directory - a
   `.gitignore`, then `node_modules` and `package.json` once plugins load -
-  which is why ocbox assembles it in its own state dir, not in the checkout.
+  which is why ocbox assembles it under the gitignored `.ocbox/`, where none of
+  it can be committed by accident.
 - **What `--no-sandbox` still takes from the user's own
   `~/.config/opencode/`**: OpenCode reads that directory alongside
   `OPENCODE_CONFIG_DIR` rather than instead of it - its DEBUG log lists both.
@@ -191,27 +210,40 @@ opencode 1.18.29 and its published schema:
   and the project's position is that only the sandboxed modes guarantee the
   host's integrity - `--no-sandbox` behaves like a standard OpenCode install
   and is documented as such.
-- **`--no-sandbox` install path, end to end on a real host**, after
-  `opencode uninstall -f` plus removing the binary it leaves behind. With
-  OpenCode absent, ocbox runs the official install script - latest release,
-  1.18.30 here while the sandbox image had 1.18.29, since neither is pinned -
-  the shell rc files stay byte-for-byte unchanged, and OpenCode lists
-  `chat`/`review` next to `build`/`plan`. With it present, nothing is installed
-  (4 s). `debug config` shows the team's `share`, `small_model` and models,
-  and a skill given through `--skills-dir` is discovered. Short commands like
-  `agent list` left only a `.gitignore` in `~/.config/opencode`; the plugin SDK
-  install appeared with a real `run`. `opencode uninstall` removes the PATH
-  line from `~/.zshrc` but not the binary, and ocbox's reinstall doesn't put
-  the PATH line back.
-- **Open: `opencode run` on the host can stall right after `init`.** Seen as
-  ~11 log lines ending at `init`, then silence, with no request reaching the
-  LLM (confirmed by a recording stub) until killed. It happened in all three
-  runs that started without the plugin dependencies present, and once right
-  after a killed run; in none of the runs that started with them present,
-  including two under a fresh `HOME` seeded with a working copy. Ruled
-  out: an incomplete install (a stalled run's `node_modules` was identical to a
-  working one), inotify limits (9 of 128 instances), and an IPv6 black hole
-  (no IPv6 route here, but connections fail in milliseconds). Cause unknown.
+- **`--no-sandbox` install path, end to end on a real host**, with OpenCode
+  fully removed first (`opencode uninstall -f`, plus the binary it leaves
+  behind). With OpenCode absent, ocbox runs the official install script under
+  a throwaway `HOME` inside `.ocbox/` and moves the binary to `.ocbox/bin/` -
+  latest release, 1.18.30 here while the sandbox image had 1.18.29, since
+  neither is pinned. `~/.opencode` is not created, the shell rc files stay
+  byte-for-byte unchanged, the assembled config directory lands in
+  `.ocbox/no-sandbox/`, and `git check-ignore` confirms `.ocbox/` is ignored.
+  With a binary already present - on `PATH`, in `~/.opencode/bin` or in
+  `.ocbox/bin/` - nothing is installed. `opencode uninstall` removes the PATH
+  line from `~/.zshrc` but not the binary.
+- **Per-mode global `AGENTS.md`, end to end with a request-recording stub.** In
+  a sandbox built with `--uv py-spy` and no `conf.py` at all, the prompt
+  OpenCode sent held the sandbox environment, `Network: none`, the uv package,
+  the team rule and the project's own `AGENTS.md`, and nothing of the host
+  environment - and the relay reached the stub at the `baseURL` read from
+  `opencode.jsonc`. Under `--no-sandbox`, the composed file holds the host
+  environment then the team rules and nothing from the sandbox; that it
+  reaches the model was confirmed by launching OpenCode 1.18.30 directly on
+  ocbox's assembled directory, because launches through ocbox kept hitting
+  the startup stall below.
+- **Open: `opencode run` on the host intermittently stalls right after
+  `init`.** Seen as ~11 log lines ending at `init`, then silence, with no
+  request reaching the LLM (confirmed by a recording stub) until killed. It is
+  not ocbox's doing: launching the binary directly stalls the same way, with
+  the same signal dispositions as a launch through ocbox. It is intermittent:
+  three direct launches answered in about 10 s in between runs - direct and
+  through ocbox alike - that all stalled. An earlier reading, that it only
+  happens without the plugin dependencies present, did not hold up: runs with
+  them present stalled too. Ruled out so far: the config directory living
+  inside the checkout (the same directory worked whenever the stall didn't
+  strike), an incomplete plugin install, inotify limits (9 of 128 instances)
+  and an IPv6 black hole (no IPv6 route here, but connections fail in
+  milliseconds). Cause unknown. No sandboxed run has shown it.
 - **Testing on a stock Ollama truncates OpenCode's prompt**: Ollama logs
   `truncating input prompt limit=2048 prompt=4512`, so with the default
   `num_ctx` the model sees only part of the system prompt, `AGENTS.md`

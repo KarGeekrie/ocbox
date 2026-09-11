@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
             detach=args.detach,
             extra_mounts=extra_mounts,
         )
-    except PodmanError as exc:
+    except (PodmanError, ConfigError) as exc:
         print(f"ocbox: {exc}", file=sys.stderr)
         return 1
 

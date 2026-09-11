@@ -198,3 +198,13 @@ def test_build_project_image_uses_dnf_for_rocky(tmp_path) -> None:
 
 def test_repo_config_dir_ships_the_team_agents_md() -> None:
     assert (image.repo_config_dir() / "AGENTS.md").is_file()
+
+
+def test_repo_local_dir_sits_next_to_opencode_config() -> None:
+    assert image.repo_local_dir() == image.repo_config_dir().parent / ".ocbox"
+
+
+def test_repo_local_dir_is_gitignored() -> None:
+    """It holds an OpenCode binary and OpenCode's node_modules - never to be committed."""
+    gitignore = (image.repo_config_dir().parent / ".gitignore").read_text().splitlines()
+    assert "/.ocbox/" in gitignore

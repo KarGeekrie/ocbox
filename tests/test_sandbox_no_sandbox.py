@@ -35,28 +35,63 @@ def test_find_or_install_uses_the_well_known_fallback_path(tmp_path, monkeypatch
     mock_run.assert_not_called()
 
 
-def test_find_or_install_runs_the_official_installer_when_missing(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path)
-    which_results = iter([None, "/usr/local/bin/opencode"])  # before, then after install
-    monkeypatch.setattr(sandbox.shutil, "which", lambda name: next(which_results))
 
-    curl_result = MagicMock(stdout=b"#!/bin/bash\necho installing\n")
-    with patch.object(sandbox.subprocess, "run", return_value=curl_result) as mock_run:
+
+def test_find_or_install_uses_an_existing_package_local_binary(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path / "home")
+    local = tmp_path / "repo" / ".ocbox"
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: local)
+    (local / "bin").mkdir(parents=True)
+    (local / "bin" / "opencode").write_text("#!/bin/sh\n")
+
+    with patch.object(sandbox.subprocess, "run") as mock_run:
+        assert sandbox._find_or_install_opencode() == str(local / "bin" / "opencode")
+    mock_run.assert_not_called()
+
+
+def _fake_installer(stdout=b"#!/bin/bash\n", produce_binary=True):
+    """Stands in for curl + the official script, which writes $HOME/.opencode/bin."""
+
+    def run(argv, **kwargs):
+        if argv[0] == "curl":
+            return MagicMock(stdout=stdout)
+        if produce_binary:
+            target = Path(kwargs["env"]["HOME"]) / ".opencode" / "bin" / "opencode"
+            target.parent.mkdir(parents=True)
+            target.write_text("binary")
+        return MagicMock()
+
+    return run
+
+
+def test_find_or_install_installs_into_the_package_not_the_home(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox.Path, "home", lambda: home)
+    monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    local = tmp_path / "repo" / ".ocbox"
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: local)
+
+    with patch.object(sandbox.subprocess, "run", side_effect=_fake_installer()) as mock_run:
         found = sandbox._find_or_install_opencode()
 
-    assert found == "/usr/local/bin/opencode"
-    curl_call, bash_call = mock_run.call_args_list
-    assert curl_call.args[0][:2] == ["curl", "-fsSL"]
+    assert found == str(local / "bin" / "opencode")
+    assert (local / "bin" / "opencode").read_text() == "binary"
+    bash_call = mock_run.call_args_list[1]
     assert bash_call.args[0] == ["bash", "-s", "--", "--no-modify-path"]
-    assert bash_call.kwargs["input"] == curl_result.stdout
+    assert Path(bash_call.kwargs["env"]["HOME"]).is_relative_to(local)
+    assert not (home / ".opencode").exists()
+    assert sorted(p.name for p in local.iterdir()) == ["bin"], "throwaway install HOME left behind"
 
 
-def test_find_or_install_raises_if_still_missing_after_install(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path)
+def test_find_or_install_raises_if_the_installer_produces_nothing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: tmp_path / "repo" / ".ocbox")
     with (
-        patch.object(sandbox.subprocess, "run", return_value=MagicMock(stdout=b"")),
-        pytest.raises(sandbox.NoSandboxError, match="add its install location to PATH"),
+        patch.object(sandbox.subprocess, "run", side_effect=_fake_installer(produce_binary=False)),
+        pytest.raises(sandbox.NoSandboxError, match="didn't produce"),
     ):
         sandbox._find_or_install_opencode()
 
@@ -76,6 +111,9 @@ def mocked_no_sandbox_env(tmp_path, monkeypatch):
     (repo_config / "skills").mkdir(parents=True)
     (repo_config / "opencode.jsonc").write_text('{"provider": {"local": {}}}')
     (repo_config / "AGENTS.md").write_text("# Team rules\n")
+    (repo_config / "environments").mkdir()
+    (repo_config / "environments" / "no-sandbox.md").write_text("# Environment: your machine\n")
+    (repo_config / "environments" / "sandbox.md").write_text("# Environment: sandbox\n")
 
     with (
         patch("ocbox.sandbox.image") as mock_image,
@@ -83,6 +121,7 @@ def mocked_no_sandbox_env(tmp_path, monkeypatch):
         patch("ocbox.sandbox.os.execvpe") as mock_execvpe,
     ):
         mock_image.repo_config_dir.return_value = repo_config
+        mock_image.repo_local_dir.return_value = tmp_path / "local"
         yield {"repo_config": repo_config, "execvpe": mock_execvpe}
 
 
@@ -178,25 +217,41 @@ def test_run_no_sandbox_ignores_a_jsonc_left_in_the_home_directory(
     assert linked.resolve() == (mocked_no_sandbox_env["repo_config"] / "opencode.jsonc").resolve()
 
 
-def test_run_no_sandbox_assembled_dir_carries_the_team_agents_md(mocked_no_sandbox_env) -> None:
-    """An AGENTS.md inside OPENCODE_CONFIG_DIR is what OpenCode sends as the
-    global one - verified against a real binary by recording request bodies."""
-    sandbox.run_no_sandbox()
-
-    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
-    linked = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
-    assert linked.resolve() == (mocked_no_sandbox_env["repo_config"] / "AGENTS.md").resolve()
-
-
-def test_run_no_sandbox_drops_the_agents_md_link_once_the_file_is_gone(
-    mocked_no_sandbox_env,
+def test_run_no_sandbox_assembles_its_config_dir_inside_the_package(
+    tmp_path, mocked_no_sandbox_env
 ) -> None:
     sandbox.run_no_sandbox()
-    (mocked_no_sandbox_env["repo_config"] / "AGENTS.md").unlink()
+
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    assert Path(env["OPENCODE_CONFIG_DIR"]).is_relative_to(tmp_path / "local")
+
+
+def test_run_no_sandbox_agents_md_is_the_host_version_plus_team_rules(
+    mocked_no_sandbox_env,
+) -> None:
+    """The sandbox description must never reach an agent running on the host."""
+    sandbox.run_no_sandbox()
+
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    agents_md = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
+    assert not agents_md.is_symlink()
+    text = agents_md.read_text()
+    assert text.index("# Environment: your machine") < text.index("# Team rules")
+    assert "# Environment: sandbox" not in text
+
+
+def test_run_no_sandbox_drops_agents_md_when_nothing_composes_one(
+    mocked_no_sandbox_env,
+) -> None:
+    repo_config = mocked_no_sandbox_env["repo_config"]
+    sandbox.run_no_sandbox()
+    (repo_config / "AGENTS.md").unlink()
+    for env_file in (repo_config / "environments").iterdir():
+        env_file.unlink()
 
     sandbox.run_no_sandbox()
 
     _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
-    link = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
-    assert not link.is_symlink()
-    assert not link.exists()
+    agents_md = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
+    assert not agents_md.exists()
+    assert not agents_md.is_symlink()

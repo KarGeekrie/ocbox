@@ -47,6 +47,16 @@ def repo_config_dir() -> Path:
     return path
 
 
+def repo_local_dir() -> Path:
+    """.ocbox/ at the repo root: what ocbox itself writes for --no-sandbox - an
+    OpenCode binary it had to install, the config directory it assembles.
+
+    Kept inside the checkout and gitignored, so ocbox doesn't scatter state
+    through the user's home. Not created here; callers create what they need.
+    """
+    return repo_config_dir().parent / ".ocbox"
+
+
 def _distro_containerfile_path(base_os: str) -> Path:
     if base_os not in DISTROS:
         raise ValueError(

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from ocbox import sandbox
+from ocbox.config import ConfigError
 from ocbox.sandbox import (
     AGENTS_DIR_MOUNT,
     EXTRA_MOUNTS_ROOT,
@@ -93,8 +94,8 @@ def test_argv_includes_resource_limits_when_set() -> None:
 
 
 def test_generate_opencode_config_uses_the_given_base_url() -> None:
-    """base_url is the relay endpoint in sandbox mode, or LLM_HOST:LLM_PORT
-    directly in --no-sandbox mode - either way it's just passed through."""
+    """base_url is the relay endpoint in sandbox mode, or opencode.jsonc's own
+    baseURL in --no-sandbox mode - either way it's just passed through."""
     cfg = _generate_opencode_config("http://127.0.0.1:8081/v1")
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 
@@ -319,12 +320,113 @@ def test_argv_skips_global_agents_md_when_absent() -> None:
     assert not any(a.endswith(f":{sandbox.GLOBAL_AGENTS_MD_MOUNT}:ro") for a in argv)
 
 
-def test_resolve_global_agents_md_returns_the_file_when_present(tmp_path, monkeypatch) -> None:
-    (tmp_path / "AGENTS.md").write_text("# rules\n")
-    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
-    assert sandbox._resolve_global_agents_md() == tmp_path / "AGENTS.md"
+# ---- the LLM's address, read from opencode.jsonc ---------------------------
 
 
-def test_resolve_global_agents_md_is_none_when_absent(tmp_path, monkeypatch) -> None:
+def _jsonc_with_base_url(tmp_path: Path, base_url: str) -> Path:
+    path = tmp_path / "opencode.jsonc"
+    path.write_text(
+        "{\n  // the address lives here\n"
+        f'  "provider": {{"local": {{"options": {{"baseURL": "{base_url}"}}}}}},\n}}\n'
+    )
+    return path
+
+
+def test_llm_endpoint_reads_host_port_and_path(tmp_path) -> None:
+    endpoint = sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "http://10.1.2.3:4567/v1/"))
+    assert (endpoint.host, endpoint.port, endpoint.path) == ("10.1.2.3", 4567, "/v1")
+
+
+def test_llm_endpoint_defaults_to_port_80(tmp_path) -> None:
+    assert sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "http://llm.lan/v1")).port == 80
+
+
+def test_llm_endpoint_rejects_https(tmp_path) -> None:
+    """The relay is plain TCP seen at http://127.0.0.1 - no certificate matches it."""
+    with pytest.raises(sandbox.LlmEndpointError, match="https"):
+        sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "https://llm.lan/v1"))
+
+
+def test_llm_endpoint_rejects_a_placeholder(tmp_path) -> None:
+    with pytest.raises(sandbox.LlmEndpointError, match="placeholder"):
+        sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "http://<IP>:<PORT>/v1"))
+
+
+def test_llm_endpoint_rejects_a_missing_base_url(tmp_path) -> None:
+    path = tmp_path / "opencode.jsonc"
+    path.write_text('{"provider": {"local": {"models": {}}}}')
+    with pytest.raises(sandbox.LlmEndpointError, match="baseURL"):
+        sandbox.llm_endpoint(path)
+
+
+def test_llm_endpoint_error_is_a_config_error() -> None:
+    """So cli.py reports it as a one-line error rather than a traceback."""
+    assert issubclass(sandbox.LlmEndpointError, ConfigError)
+
+
+def test_the_team_opencode_jsonc_names_a_usable_llm() -> None:
+    endpoint = sandbox.llm_endpoint(sandbox.image.repo_config_dir() / "opencode.jsonc")
+    assert endpoint.host and endpoint.port > 0
+
+
+def test_argv_network_comes_from_the_same_constant_the_agents_md_describes() -> None:
+    argv = build_podman_run_argv(_plan())
+    assert argv[argv.index("--network") + 1] == sandbox.SANDBOX_NETWORK == "none"
+
+
+# ---- the AGENTS.md composed per mode ---------------------------------------
+
+
+def test_sandbox_facts_without_network_say_so() -> None:
+    facts = "\n".join(sandbox._sandbox_facts("ubuntu", [], [], []))
+    assert "Network: none" in facts
+    assert "Extra system packages: none." in facts
+    assert "Extra Python packages (uv): none." in facts
+
+
+def test_sandbox_facts_describe_a_network_when_there_is_one() -> None:
+    facts = "\n".join(sandbox._sandbox_facts("ubuntu", [], [], [], network="slirp4netns"))
+    assert "Network: available" in facts
+    assert "Network: none" not in facts
+
+
+def test_sandbox_facts_list_packages_distro_and_mounts() -> None:
+    facts = "\n".join(
+        sandbox._sandbox_facts("rocky", ["git", "jq"], ["py-spy"], [Path("/home/u/shared-lib")])
+    )
+    assert "rocky" in facts
+    assert "git, jq" in facts
+    assert "py-spy" in facts
+    assert "`/mnt/shared-lib`" in facts
+
+
+def test_compose_global_agents_md_orders_environment_facts_then_team_rules(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "environments").mkdir()
+    (tmp_path / "environments" / "sandbox.md").write_text("# Environment: sandbox\n")
+    (tmp_path / "AGENTS.md").write_text("# Team rules\n")
     monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
-    assert sandbox._resolve_global_agents_md() is None
+
+    text = sandbox._compose_global_agents_md("sandbox", ["## This sandbox", "- fact"])
+
+    assert text.index("# Environment: sandbox") < text.index("- fact") < text.index("# Team rules")
+
+
+def test_compose_global_agents_md_uses_only_the_requested_environment(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "environments").mkdir()
+    (tmp_path / "environments" / "sandbox.md").write_text("SANDBOX-ONLY\n")
+    (tmp_path / "environments" / "no-sandbox.md").write_text("HOST-ONLY\n")
+    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
+
+    text = sandbox._compose_global_agents_md("no-sandbox", [])
+
+    assert "HOST-ONLY" in text
+    assert "SANDBOX-ONLY" not in text
+
+
+def test_compose_global_agents_md_is_none_when_there_is_nothing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
+    assert sandbox._compose_global_agents_md("sandbox", []) is None

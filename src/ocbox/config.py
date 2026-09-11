@@ -1,4 +1,4 @@
-"""Loads ocbox's conf.py configuration files."""
+"""Loads ocbox's optional conf.py configuration files."""
 
 from __future__ import annotations
 
@@ -12,33 +12,19 @@ from ocbox.image import DEFAULT_BASE_OS, DISTROS
 GLOBAL_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "conf.py"
 PROJECT_CONFIG_NAME = "ocbox.conf.py"
 
-EXAMPLE_CONFIG = '''\
-# ~/.config/ocbox/conf.py
-#
-# Required: where ocbox's network relay reaches your locally-running LLM server.
-LLM_HOST = "127.0.0.1"
-LLM_PORT = 11434
-
-# Optional overrides (defaults shown):
-# BASE_OS = "ubuntu"            # or "debian", "rocky"
-# BASE_IMAGE = "ocbox/base:latest"
-# CONTAINER_WEB_PORT = 4096
-# HOST_WEB_PORT = None          # None picks a free ephemeral port
-# EXTRA_APT_DEFAULT = []        # package names for BASE_OS's package manager
-# EXTRA_UV_DEFAULT = []
-# MEMORY_LIMIT = None           # e.g. "2g"
-# PIDS_LIMIT = None             # e.g. 512
-'''
+# Where the LLM is used to be set here. It now comes from
+# provider.local.options.baseURL in opencode-config/opencode.jsonc - the one
+# place that address is written - so these are rejected rather than silently
+# ignored, which would leave someone editing a value that does nothing.
+MOVED_TO_OPENCODE_JSONC = ("LLM_HOST", "LLM_PORT")
 
 
 class ConfigError(Exception):
-    """Raised when conf.py is missing or invalid."""
+    """Raised when a conf.py named explicitly is missing, or a conf.py is invalid."""
 
 
 @dataclass
 class Config:
-    llm_host: str
-    llm_port: int
     base_os: str = DEFAULT_BASE_OS
     base_image: str = "ocbox/base:latest"
     container_web_port: int = 4096
@@ -61,11 +47,16 @@ def _load_module_from_path(path: Path) -> types.ModuleType:
     return module
 
 
-def _apply_overrides(cfg: Config, module: types.ModuleType) -> Config:
-    if hasattr(module, "LLM_HOST"):
-        cfg.llm_host = str(module.LLM_HOST)
-    if hasattr(module, "LLM_PORT"):
-        cfg.llm_port = int(module.LLM_PORT)
+def _apply_overrides(
+    cfg: Config, module: types.ModuleType, path: Path | None = None
+) -> Config:
+    moved = [name for name in MOVED_TO_OPENCODE_JSONC if hasattr(module, name)]
+    if moved:
+        raise ConfigError(
+            f"{path or 'conf.py'} sets {' and '.join(moved)}, which ocbox no longer "
+            "reads: the LLM's address now comes from provider.local.options.baseURL "
+            "in opencode-config/opencode.jsonc. Remove them from this file."
+        )
     if hasattr(module, "BASE_OS"):
         base_os = str(module.BASE_OS)
         if base_os not in DISTROS:
@@ -97,30 +88,23 @@ def load_config(
     project_dir: Path | None = None,
     global_path: Path = GLOBAL_CONFIG_PATH,
 ) -> Config:
-    """Loads the global conf.py, then an optional project-local ocbox.conf.py override.
+    """Loads conf.py if there is one, then an optional project-local ocbox.conf.py.
 
-    Raises ConfigError if the global config is missing or doesn't define LLM_HOST/LLM_PORT.
+    Every setting has a default, so neither file is required. A path given
+    explicitly (--config) must exist, though: naming a file that isn't there is
+    a mistake worth reporting rather than quietly running on defaults.
     """
+    if explicit_path is not None and not explicit_path.exists():
+        raise ConfigError(f"No config found at {explicit_path}.")
+
+    cfg = Config()
     base_path = explicit_path or global_path
-    if not base_path.exists():
-        raise ConfigError(
-            f"No config found at {base_path}.\n"
-            "Create it with at least:\n\n"
-            f"{EXAMPLE_CONFIG}"
-        )
-
-    module = _load_module_from_path(base_path)
-    if not hasattr(module, "LLM_HOST") or not hasattr(module, "LLM_PORT"):
-        raise ConfigError(
-            f"{base_path} must define LLM_HOST and LLM_PORT.\n\nExample:\n\n{EXAMPLE_CONFIG}"
-        )
-
-    cfg = Config(llm_host=str(module.LLM_HOST), llm_port=int(module.LLM_PORT))
-    cfg = _apply_overrides(cfg, module)
+    if base_path.exists():
+        cfg = _apply_overrides(cfg, _load_module_from_path(base_path), base_path)
 
     if project_dir is not None:
         project_conf = project_dir / PROJECT_CONFIG_NAME
         if project_conf.exists():
-            cfg = _apply_overrides(cfg, _load_module_from_path(project_conf))
+            cfg = _apply_overrides(cfg, _load_module_from_path(project_conf), project_conf)
 
     return cfg

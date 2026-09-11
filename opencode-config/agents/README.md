@@ -20,6 +20,21 @@ other agents), or `all`. Other frontmatter fields OpenCode accepts: `model`,
 `temperature`, `top_p`. Don't put `prompt:` in the frontmatter - the body is
 the prompt.
 
+## What's here, and what isn't
+
+This directory holds the team's additional agents: `chat`, for talking through
+code without changing it, and `review`, for finding bugs in a change.
+
+`build` and `plan` are deliberately **not** here. They are OpenCode's own
+built-in primary agents, used exactly as OpenCode ships them. A `build.md` or
+`plan.md` in this directory would change them - OpenCode merges such a file
+into the built-in agent of the same name - so leave those names alone.
+
+Agent prompts describe a role, not an environment. Where the agent runs - a
+sandbox without network, or the user's own machine - comes from the global
+`AGENTS.md` ocbox composes for each mode (see the main README's "Workflow"),
+so no agent file states something that is only true in one mode.
+
 ## Restricting what an agent can do
 
 `permission` gates individual tools with `allow`, `ask` or `deny`, and covers
@@ -32,25 +47,19 @@ through `bash` - `echo x > file` is not an edit as far as permissions are
 concerned. `chat` therefore denies both; `review` denies `edit` and sets
 `bash: ask`, so `git diff` stays available under the user's approval.
 
-Every agent here denies `webfetch`: the sandbox has no network, so it can only
-ever fail, and denying it stops the agent burning turns on retries.
+Both deny `webfetch`: they work from the code in front of them, and in a
+sandbox, which has no network, a fetch could only fail.
 
-This directory is bind-mounted read-only into every sandbox at
+## How ocbox loads them
+
+In the sandboxed modes this directory is bind-mounted read-only at
 `~/.config/opencode/agents`, the documented location for global agents
-(<https://opencode.ai/docs/agents/>). Unlike skills, there is no config key
-that points at an arbitrary agent folder, so the mount location is what makes
-these load. OpenCode accepts the singular `agent/` too, but the plural is what
-the docs name.
+(<https://opencode.ai/docs/agents/>). With `--no-sandbox` it is linked into the
+config directory ocbox hands OpenCode through `OPENCODE_CONFIG_DIR`. OpenCode
+accepts the singular `agent/` too, but the plural is what the docs name.
 
-`build.md` and `plan.md` override OpenCode's built-in agents of the same
-name. The override is a merge, and permissions merge *per key*: naming
-`webfetch` in `plan.md` leaves plan mode's three built-in `edit` rules exactly
-as they were. That is why neither file redeclares `edit` - hand-copying those
-rules would risk weakening plan mode with no visible sign, and there is
-nothing to gain since the built-ins already survive.
-
-Verified against opencode 1.18.29: `opencode agent list` from inside a
-sandbox shows what actually loaded, and `opencode debug agent <name>` shows
-one agent's resolved configuration. A file OpenCode doesn't accept is simply
-absent from the list rather than reported as an error - this README, for
-instance, has no frontmatter and so is correctly ignored.
+`opencode agent list` shows what actually loaded, and
+`opencode debug agent <name>` one agent's resolved configuration. A file
+OpenCode doesn't accept is simply absent from the list rather than reported as
+an error - this README, for instance, has no frontmatter and so is correctly
+ignored.
