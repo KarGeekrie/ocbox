@@ -251,9 +251,15 @@ wins where both set the same key - while a personal `AGENTS.md` is replaced by
 the one ocbox composes for this mode. So in this mode, behaviour isn't
 guaranteed to be identical for everyone on the team.
 
-One more thing to expect: on the host, OpenCode's own startup occasionally
-stalls for minutes before answering, whether ocbox launched it or not - see
-AGENTS.md's "Verification history". No sandboxed run has shown it.
+**Known limitation: OpenCode can hang on the host.** OpenCode sometimes
+stops right after starting up, before sending anything to the LLM, and waits
+until it is killed. The hang tends to come in stretches: no run succeeds for a
+while, then every run works again. The bare `opencode` binary hangs the same way
+without ocbox, including with a fresh home directory and an empty environment,
+so this is an OpenCode bug that ocbox can't work around - see the open upstream
+issue [anomalyco/opencode#42779](https://github.com/anomalyco/opencode/issues/42779)
+and AGENTS.md's "Verification history". The sandboxed modes aren't affected:
+when it happens, run without `--no-sandbox`.
 
 **No relay in this mode**: OpenCode connects straight to the `baseURL` in
 `opencode-config/opencode.jsonc`, so that address has to be reachable from the
