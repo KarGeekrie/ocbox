@@ -209,9 +209,6 @@ def daemonize(log_path: Path) -> int:
     return 0
 
 
-USER_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "opencode.jsonc"
-
-
 # ocbox sets these itself: the web UI is reached through a relay bound to a
 # port ocbox chose, so a second --port/--hostname on the same command line
 # either conflicts or silently detaches OpenCode from the bridge.
@@ -249,18 +246,6 @@ def check_opencode_args(args: list[str], mode: str = "tui") -> None:
                 "OpenCode from the relay that exposes it. Use --web-port to choose "
                 "the port you connect to on the host."
             )
-
-
-def _resolve_user_config() -> Path:
-    """The user's own OpenCode settings, or the packaged empty default.
-
-    Kept next to conf.py in ~/.config/ocbox/ because what belongs here - the
-    list of models your LLM server serves - is a property of that server, the
-    same thing LLM_HOST/LLM_PORT describe.
-    """
-    if USER_CONFIG_PATH.exists():
-        return USER_CONFIG_PATH
-    return image.repo_config_dir() / "opencode.jsonc"
 
 
 def _generate_opencode_config(base_url: str) -> dict:
@@ -354,7 +339,9 @@ def run(
     container_web_port = cfg.container_web_port
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
-    resolved_user_config = user_config or _resolve_user_config()
+    # Only opencode-config/opencode.jsonc is the user's to touch; --opencode-config
+    # exists for a one-off run, and nothing in the home directory overrides it.
+    resolved_user_config = user_config or (image.repo_config_dir() / "opencode.jsonc")
     resolved_global_agents_md = _resolve_global_agents_md()
 
     opencode_config_path = run_dir / "opencode.json"
@@ -575,7 +562,9 @@ def run_no_sandbox(
 
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
-    resolved_user_config = user_config or _resolve_user_config()
+    # Only opencode-config/opencode.jsonc is the user's to touch; --opencode-config
+    # exists for a one-off run, and nothing in the home directory overrides it.
+    resolved_user_config = user_config or (image.repo_config_dir() / "opencode.jsonc")
     resolved_global_agents_md = _resolve_global_agents_md()
 
     config_dir = _build_no_sandbox_config_dir(

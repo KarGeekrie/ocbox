@@ -58,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="OpenCode settings (models, theme, ...) to mount into the sandbox. "
-        "Defaults to ~/.config/ocbox/opencode.jsonc when it exists.",
+        "Defaults to opencode-config/opencode.jsonc.",
     )
     parser.add_argument(
         "--skills-dir", type=Path, default=None, help="Override the default skills/ directory."

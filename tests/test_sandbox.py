@@ -163,8 +163,8 @@ def test_argv_mounts_user_config_as_opencode_global_config() -> None:
     """Mounted at OpenCode's *global* config path on purpose: global ranks
     below OPENCODE_CONFIG, so ocbox keeps control of the provider endpoint
     while the user's model list is merged in."""
-    argv = build_podman_run_argv(_plan(user_config=Path("/home/u/.config/ocbox/opencode.jsonc")))
-    assert f"/home/u/.config/ocbox/opencode.jsonc:{USER_CONFIG_MOUNT}:ro" in argv
+    argv = build_podman_run_argv(_plan(user_config=Path("/repo/opencode-config/opencode.jsonc")))
+    assert f"/repo/opencode-config/opencode.jsonc:{USER_CONFIG_MOUNT}:ro" in argv
     assert USER_CONFIG_MOUNT == "/home/ocbox/.config/opencode/opencode.jsonc"
 
 
@@ -237,18 +237,6 @@ def test_argv_tui_mode_still_mounts_workspace_and_config() -> None:
     assert "/pkg/data/skills" in sources
 
 
-def test_resolve_user_config_prefers_the_users_file(tmp_path, monkeypatch) -> None:
-    user_file = tmp_path / "opencode.jsonc"
-    user_file.write_text("{}")
-    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", user_file)
-    assert sandbox._resolve_user_config() == user_file
-
-
-def test_resolve_user_config_falls_back_to_packaged_default(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", tmp_path / "absent.jsonc")
-    resolved = sandbox._resolve_user_config()
-    assert resolved.name == "opencode.jsonc"
-    assert resolved.exists(), "the packaged default must ship, it is always mounted"
 
 
 def test_argv_appends_opencode_args_after_the_image_tag() -> None:

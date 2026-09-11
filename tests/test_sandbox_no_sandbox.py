@@ -77,11 +77,6 @@ def mocked_no_sandbox_env(tmp_path, monkeypatch):
     (repo_config / "opencode.jsonc").write_text('{"provider": {"local": {}}}')
     (repo_config / "AGENTS.md").write_text("# Team rules\n")
 
-    # USER_CONFIG_PATH is an absolute path off the real HOME, so without this
-    # the test picks up the developer's own ~/.config/ocbox/opencode.jsonc and
-    # fails - on exactly the machines where the feature is actually used.
-    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", tmp_path / "absent" / "opencode.jsonc")
-
     with (
         patch("ocbox.sandbox.image") as mock_image,
         patch("ocbox.sandbox._find_or_install_opencode", return_value="/usr/bin/opencode"),
@@ -166,19 +161,21 @@ def test_run_no_sandbox_assembled_dir_honors_the_dir_overrides(
     assert (Path(env["OPENCODE_CONFIG_DIR"]) / "agents").resolve() == custom_agents.resolve()
 
 
-def test_run_no_sandbox_prefers_the_users_own_opencode_jsonc(
+def test_run_no_sandbox_ignores_a_jsonc_left_in_the_home_directory(
     tmp_path, monkeypatch, mocked_no_sandbox_env
 ) -> None:
-    user_file = tmp_path / "user" / "opencode.jsonc"
-    user_file.parent.mkdir()
-    user_file.write_text('{"provider": {"local": {}}}')
-    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", user_file)
+    """opencode-config/opencode.jsonc is the only default. A copy under
+    ~/.config/ocbox - which older versions preferred - must not shadow it."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    stray = tmp_path / "home" / ".config" / "ocbox" / "opencode.jsonc"
+    stray.parent.mkdir(parents=True)
+    stray.write_text('{"provider": {"local": {}}}')
 
     sandbox.run_no_sandbox()
 
     _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
     linked = Path(env["OPENCODE_CONFIG_DIR"]) / "opencode.jsonc"
-    assert linked.resolve() == user_file.resolve()
+    assert linked.resolve() == (mocked_no_sandbox_env["repo_config"] / "opencode.jsonc").resolve()
 
 
 def test_run_no_sandbox_assembled_dir_carries_the_team_agents_md(mocked_no_sandbox_env) -> None:
