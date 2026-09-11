@@ -363,7 +363,7 @@ def _sandbox_facts(
         "## This sandbox",
         "",
         net,
-        f"- Base system: {base_os}, with python3, uv and curl.",
+        f"- Base system: {base_os}, with python3, uv, curl and ripgrep (`rg`).",
         "- Extra system packages: " + (", ".join(apt_pkgs) if apt_pkgs else "none") + ".",
         "- Extra Python packages (uv): " + (", ".join(uv_pkgs) if uv_pkgs else "none") + ".",
         "- Project directories, where changes are real: " + ", ".join(project_dirs) + ".",

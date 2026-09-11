@@ -252,24 +252,34 @@ opencode 1.18.29 and its published schema:
   With `"/mnt/extra/**": "allow"` - written in the jsonc, or in the run's
   generated `OPENCODE_CONFIG` as ocbox now does - all three worked and the
   write landed on the host, and `opencode debug config` listed the generated
-  entry after the team's, not instead of them.
-- **Open: `opencode run` on the host intermittently stalls right after
-  `init`.** Seen as ~11 log lines ending at `init`, then silence, with no
-  request reaching the LLM (confirmed by a recording stub) until killed. It is
-  not ocbox's doing: launching the binary directly stalls the same way, with
-  the same signal dispositions as a launch through ocbox. It is intermittent:
-  three direct launches answered in about 10 s in between runs - direct and
-  through ocbox alike - that all stalled. An earlier reading, that it only
-  happens without the plugin dependencies present, did not hold up: runs with
-  them present stalled too. Ruled out so far: the config directory living
-  inside the checkout (the same directory worked whenever the stall didn't
-  strike), an incomplete plugin install, inotify limits (9 of 128 instances)
-  and an IPv6 black hole (no IPv6 route here, but connections fail in
-  milliseconds). Cause unknown. No sandboxed run has shown it. Untested
-  hypothesis: memory pressure - swap activity or an OOM-adjacent stall on the
-  host during the hang would fit the intermittency better than anything ruled
-  out so far. Check `free -h` / swap I/O the next time it strikes before
-  ruling this one out too.
+  entry after the team's, not instead of them. Then end to end on this code:
+  `read`, `write`, `ls` and a `bash` call with `workdir` all worked on
+  `/mnt/extra`, while `/etc/hostname` stayed refused.
+- **Open: `opencode run` on the host can stall right after `init`**, before
+  the session is created. No request reaches the LLM, and the process sits idle:
+  no CPU over 5 s, every thread waiting in `epoll_wait` or on a futex, no TCP
+  socket. Investigated with a request-recording stub on 2026-09-11:
+  - 32 runs in a row succeeded. From then on, every run stalled for the rest of
+    the session, whatever the setup:
+    - the `opencode` binary launched directly, without ocbox;
+    - a fresh `HOME` with fresh XDG directories;
+    - an empty environment (`env -i`);
+    - a fresh `XDG_STATE_HOME`, which holds OpenCode's `locks/`;
+    - a fresh `XDG_DATA_HOME`, which holds its SQLite database.
+
+    Sandboxed runs kept working throughout.
+  - Ruled out:
+    - Memory pressure: 6/6 runs succeeded with OpenCode held to
+      `MemoryHigh=280M` and swapping heavily, only twice as slow.
+    - An outbound request that never gets an answer: a tarpit proxy received no
+      connection and changed nothing.
+    - OpenCode's `Flock` directory locks and its database: fresh copies stall
+      the same way.
+    - Anything ocbox sets up: the bare binary stalls too.
+  - Matches the open upstream issue anomalyco/opencode#42779: `opencode run`
+    hangs at `init`, with no `created` line and no request.
+
+  ocbox can't fix this, and the sandboxed modes are unaffected.
 - **Testing on a stock Ollama truncates OpenCode's prompt**: Ollama logs
   `truncating input prompt limit=2048 prompt=4512`, so with the default
   `num_ctx` the model sees only part of the system prompt, `AGENTS.md`
@@ -315,6 +325,18 @@ Confirmed working this way:
   Containerfile itself (the actual `dnf install` line) has **not** been
   built against a real Rocky mirror - the dev sandbox this was validated in
   had no route to dl.rockylinux.org. Verify it builds before relying on it.
+- **An ocbox update refreshes uv and OpenCode in the images**: with the
+  revision in `base_fingerprint()`, the first sandbox run on a new commit
+  rebuilt `ocbox/base` without the layer cache (about 12 minutes here). It moved
+  OpenCode from 1.18.29 to 1.18.30 and uv from 0.12.10 to 0.12.13, both the
+  latest upstream releases at the time, and relabelled the image. The next run
+  reused it (22 s).
+- **OpenCode's `glob` and `grep` need `rg` in the image**: without it,
+  OpenCode tries to download ripgrep on first use (`downloading ripgrep` in the
+  home volumes' logs), and both tools fail with `ripgrep execution failed` in a
+  sandbox with no network. With `ripgrep` installed (14.1.0 on Ubuntu), a stub
+  LLM's `glob` and `grep` calls found their files both in `/workspace` and in a
+  `--mount` directory.
 - `--uv`/`EXTRA_UV_DEFAULT` on the Debian/Ubuntu images: uv refuses
   `uv pip install --system` on a Python marked externally managed (PEP 668),
   which broke the project image build on the default `BASE_OS` until
