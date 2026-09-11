@@ -241,9 +241,15 @@ guaranteed to behave identically for everyone on the team - a personal global
 config comes along. Project-level `AGENTS.md` files in the directory you run
 from load as usual.
 
-(OpenCode itself may still create `~/.config/opencode/` and drop a small
-housekeeping `.gitignore` there. That happens whether or not ocbox is
-involved - it is OpenCode's own behaviour, not something ocbox does.)
+**OpenCode itself does write there, though.** At startup it installs its
+plugin SDK - `@opencode-ai/plugin`, about 63 MB - into `~/.config/opencode/` as
+`package.json`, `package-lock.json` and `node_modules/`, next to a `.gitignore`,
+and does the same in the config directory ocbox hands it. That is OpenCode's
+own behaviour, not ocbox's - see upstream
+[#30908](https://github.com/anomalyco/opencode/issues/30908) and
+[#27676](https://github.com/anomalyco/opencode/issues/27676) - and it has no
+documented off switch. It needs network, so a sandbox is unaffected: no
+`package.json` or `node_modules` ends up in a sandbox's home volume.
 
 **No `conf.py` needed for this mode.** Unlike web/`--tui`, ocbox generates no
 provider override here - there's no relay to point at, so

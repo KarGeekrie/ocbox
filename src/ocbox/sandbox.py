@@ -511,10 +511,11 @@ def _build_no_sandbox_config_dir(
 
     OPENCODE_CONFIG_DIR takes a single directory, but --agents-dir/--skills-dir
     can point anywhere, so this stitches them together with symlinks in a
-    directory ocbox owns outright. Nothing is written under the user's
-    ~/.config/opencode, and the repo checkout stays clean: OpenCode writes into
-    whatever directory it is given (a .gitignore, then node_modules and
-    package.json once plugins load), and that lands here instead.
+    directory ocbox owns outright. ocbox writes nothing under the user's
+    ~/.config/opencode, and the repo checkout stays clean: OpenCode installs its
+    plugin SDK (package.json, node_modules) into the directory it is given, so
+    that copy lands here rather than in the checkout. It installs another copy
+    into ~/.config/opencode on its own account, which no config wiring prevents.
 
     Verified against opencode 1.18.29 rather than assumed: agents, skills and
     opencode.jsonc all load from a directory given through OPENCODE_CONFIG_DIR;
@@ -557,7 +558,9 @@ def run_no_sandbox(
 
     Everything is passed by environment variable rather than written into the
     user's home: OPENCODE_CONFIG_DIR points at a directory ocbox assembles in
-    its own state dir, and nothing is written under ~/.config/opencode.
+    its own state dir, and ocbox itself writes nothing under
+    ~/.config/opencode - though OpenCode, on its own account, installs its
+    plugin SDK there at startup.
     OpenCode does still *read* that directory alongside the one it is given -
     measured against 1.18.29 with a marker in each file: the user's own
     opencode.jsonc and agents/ are merged in, while their AGENTS.md is replaced

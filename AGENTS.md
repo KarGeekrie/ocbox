@@ -177,6 +177,33 @@ opencode 1.18.29 and its published schema:
   `AGENTS.md` is not sent at all, replaced by the one in `OPENCODE_CONFIG_DIR`.
   An earlier README claimed the user's directory was neither read nor used in
   this mode - wrong for everything except `AGENTS.md`.
+- **OpenCode writes into the host's `~/.config/opencode/` on its own**: at
+  startup it installs `@opencode-ai/plugin` there (`package.json`,
+  `package-lock.json`, `node_modules/`, ~63 MB) and into whatever
+  `OPENCODE_CONFIG_DIR` names. Reproduced under a fresh throwaway `HOME`, and a
+  known upstream behaviour (anomalyco/opencode#30908, #27676) with no
+  documented off switch. Sandboxes are unaffected - no network, and no
+  `package.json`/`node_modules` in their home volumes. Tried: pointing the
+  OpenCode process's `XDG_CONFIG_HOME` at an ocbox-owned directory. The user's
+  own directory then stays byte-for-byte unchanged, their personal agents and
+  models stop merging in, and the install lands in the ocbox-owned directory.
+  Not adopted, since it also changes `XDG_CONFIG_HOME` for every tool OpenCode
+  spawns; left as a decision.
+- **Open: `opencode run` on the host can stall right after `init`.** Seen as
+  ~11 log lines ending at `init`, then silence, with no request reaching the
+  LLM (confirmed by a recording stub) until killed. It happened in all three
+  runs that started without the plugin dependencies present, and once right
+  after a killed run; in none of the runs that started with them present,
+  including two under a fresh `HOME` seeded with a working copy. Ruled
+  out: an incomplete install (a stalled run's `node_modules` was identical to a
+  working one), inotify limits (9 of 128 instances), and an IPv6 black hole
+  (no IPv6 route here, but connections fail in milliseconds). Cause unknown.
+- **Testing on a stock Ollama truncates OpenCode's prompt**: Ollama logs
+  `truncating input prompt limit=2048 prompt=4512`, so with the default
+  `num_ctx` the model sees only part of the system prompt, `AGENTS.md`
+  included, and a cold model on CPU takes ~90 s per request. The team's models
+  declare 200k contexts, so this only matters for local testing: judge what
+  OpenCode *sends* from a recorded request body, not from the model's answer.
 
 Two observables look usable for "does this reach the model?" and are not: the
 token counts in `opencode run --format json` (against Ollama they report the

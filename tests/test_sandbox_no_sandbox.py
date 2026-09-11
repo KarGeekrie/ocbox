@@ -137,9 +137,10 @@ def test_run_no_sandbox_points_opencode_at_an_assembled_config_dir(
 def test_run_no_sandbox_never_touches_the_users_opencode_config(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
-    """ocbox writes nothing under ~/.config/opencode, so a config the user
-    already has is left exactly as it was. OpenCode itself still reads it -
-    see run_no_sandbox's docstring - but that is a read, not a write by ocbox."""
+    """ocbox itself writes nothing under ~/.config/opencode: no symlinks, no
+    config. OpenCode, when actually run, reads that directory and installs its
+    plugin SDK there on its own account - see run_no_sandbox's docstring. This
+    test pins what ocbox does, with OpenCode's exec mocked out."""
     users_config = tmp_path / "config" / "opencode"
     users_config.mkdir(parents=True)
     (users_config / "agents").mkdir()
