@@ -115,12 +115,15 @@ exactly how the integration tests were validated during initial development
   `tests/test_update_check.py` drives real git repositories (bare remote plus
   clones), not mocks; `tests/test_cli.py` sets `OCBOX_SKIP_UPDATE_CHECK` so the
   other CLI tests don't fetch this checkout's remote.
-- `image.py` builds and caches sandbox images, with a content-hash `LABEL`
-  on the base image so an ocbox upgrade (changed `Containerfile`/`relay.py`/
-  `entrypoint.sh`) triggers a rebuild instead of silently reusing a stale
-  cached image forever. If you change any file under `src/ocbox/data/`,
-  this rebuild-triggering is why you don't need to bump a version number by
-  hand. The base OS is selectable (`BASE_OS` in `conf.py` -
+- `image.py` builds and caches sandbox images. The base image carries a
+  `base_fingerprint()` label - the distro's Containerfile, `relay.py`,
+  `entrypoint.sh` and the ocbox revision (the checkout's commit) - so an ocbox
+  update or a change under `src/ocbox/data/` rebuilds it, and project images
+  follow through `packages_fingerprint()`. It rebuilds with `--no-cache`: uv
+  and OpenCode are deliberately unpinned, an ocbox update is when the team
+  moves to their current versions, and a cached `curl | bash` layer would
+  quietly keep the old ones. Side effect while developing: the first sandbox
+  run after each commit rebuilds the base image. The base OS is selectable (`BASE_OS` in `conf.py` -
   debian/ubuntu/rocky) - each distro's Containerfile lives under
   `data/distros/<name>/Containerfile` and shares the same `relay.py`/
   `entrypoint.sh` (COPY'd from the shared top-level `data/` context
@@ -128,7 +131,7 @@ exactly how the integration tests were validated during initial development
   each name to its package manager (`apt` or `dnf`), which
   `build_project_image()` uses to install a project's extra packages. When
   adding a distro variant, register it in `image.DISTROS` and add its
-  Containerfile - `containerfile_fingerprint()`/`ensure_base_image()` pick
+  Containerfile - `base_fingerprint()`/`ensure_base_image()` pick
   the rest up automatically. The `rocky` variant was written but never
   built against a real Rocky mirror (network-blocked in the dev sandbox
   that validated this) - see "Verification history" below before trusting
@@ -242,6 +245,14 @@ opencode 1.18.29 and its published schema:
   reaches the model was confirmed by launching OpenCode 1.18.30 directly on
   ocbox's assembled directory, because launches through ocbox kept hitting
   the startup stall below.
+- **`--mount` directories need `permission.external_directory`**: a stub LLM
+  issued `read`, `write` and `bash` calls on `/workspace` and on a `--mount`
+  directory at `/mnt/extra`. Under the team's `opencode.jsonc` (`"*": "deny"`)
+  the three calls on `/mnt/extra` came back refused while `/workspace` worked.
+  With `"/mnt/extra/**": "allow"` - written in the jsonc, or in the run's
+  generated `OPENCODE_CONFIG` as ocbox now does - all three worked and the
+  write landed on the host, and `opencode debug config` listed the generated
+  entry after the team's, not instead of them.
 - **Open: `opencode run` on the host intermittently stalls right after
   `init`.** Seen as ~11 log lines ending at `init`, then silence, with no
   request reaching the LLM (confirmed by a recording stub) until killed. It is

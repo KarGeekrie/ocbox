@@ -182,16 +182,15 @@ becomes `/mnt/shared-lib`), independent of the primary workspace and of each
 other - basenames must be distinct across every `--mount`, or ocbox refuses
 to start rather than silently mounting one over the other.
 
-**The mount alone may not be enough.** OpenCode's own
-`permission.external_directory` rules are believed to gate access to anything
-outside the primary working directory *regardless* of what's mounted, and the
-team's `opencode-config/opencode.jsonc` denies every path it doesn't list. If
-OpenCode refuses a `/mnt/`-mounted path, it needs an entry there, e.g.
-`"external_directory": {"/mnt/shared-lib/*": "allow"}` - one of the few edits
-to that file worth making, ideally as a commit so the whole team gets it. ocbox doesn't
-generate this permission entry itself (see AGENTS.md's "Verification
-history" for why). `--no-sandbox` mode doesn't need `--mount` at all - there's
-no filesystem restriction to work around in the first place.
+OpenCode's permissions follow the mounts. OpenCode refuses its tools any path
+outside the project unless `permission.external_directory` allows it, and the
+team's `opencode-config/opencode.jsonc` denies every such path. For each
+`--mount`, ocbox therefore adds `"/mnt/<basename>/**": "allow"` to the
+configuration it generates for the run. OpenCode merges that entry into the
+team's rules, which still apply to every other path.
+
+`--no-sandbox` doesn't take `--mount`: OpenCode sees the host's filesystem
+directly, and the team's `external_directory` rules apply to it as written.
 
 ### Terminal UI instead of the web UI
 
@@ -561,6 +560,13 @@ The pull is what brings the new code. The pip install refreshes what pip
 recorded the first time: the version number, the `ocbox` command, any new
 dependency. `--ff-only` makes git stop rather than merge when you have local
 commits in the way.
+
+The first sandbox run after an update rebuilds the images from scratch, which
+takes a few minutes. That rebuild is also how the sandbox gets the current uv
+and OpenCode: the images install both unpinned, and refresh them only then.
+`opencode-config/` - `opencode.jsonc`, agents, skills, `AGENTS.md` - is not part
+of any image: it is mounted at every run, so a change to it applies on the next
+run, update or not.
 
 The check fetches from the remote at most once a day, and keeps the timestamp in
 the gitignored `.ocbox/update-check.json`. A failed fetch - offline, no SSH

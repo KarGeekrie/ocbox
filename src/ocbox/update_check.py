@@ -124,6 +124,11 @@ def _upstream(repo: Path) -> str | None:
     ) or _output(repo, "rev-parse", "--abbrev-ref", "origin/HEAD")
 
 
+def revision(repo: Path) -> str | None:
+    """The commit the checkout at `repo` is on, or None outside a git checkout."""
+    return _output(repo, "rev-parse", "HEAD")
+
+
 def check(repo: Path, state_dir: Path, *, now: float | None = None) -> UpdateStatus:
     """Where the checkout at `repo` stands against its remote. Never raises."""
     if os.environ.get("OCBOX_SKIP_UPDATE_CHECK") or not _is_checkout(repo):

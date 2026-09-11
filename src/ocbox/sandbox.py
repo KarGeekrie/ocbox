@@ -47,19 +47,11 @@ SKILLS_DIR_MOUNT = "/home/ocbox/.config/opencode/skills"
 # Nests inside /home/ocbox like the directories above, so it mounts after the
 # volume. Optional content: no mount at all when the file doesn't exist.
 GLOBAL_AGENTS_MD_MOUNT = "/home/ocbox/.config/opencode/AGENTS.md"
-# UNVERIFIED (see AGENTS.md "Verification history"): unlike agents/skills,
 # Root for --mount's extra working directories, one per basename
 # (<host-path>:/mnt/<basename>:rw), independent of /workspace and each other -
-# unlike agents/skills, nothing here nests inside another mount.
-#
-# CAVEAT (unverified - see AGENTS.md "Verification history"): the mount
-# itself makes a directory visible inside the container, but OpenCode's own
-# `permission.external_directory` rules (see the example in
-# opencode-config/opencode.jsonc) may still need to explicitly allow a path
-# under /mnt/ before OpenCode will actually read/edit it - ocbox does not
-# generate that permission entry itself, since it's unclear whether doing so
-# in the OPENCODE_CONFIG override would merge with or clobber whatever
-# `permission` rules the user's own opencode.jsonc sets.
+# unlike agents/skills, nothing here nests inside another mount. Being visible
+# isn't enough for OpenCode's tools, which treat these as paths outside the
+# project - see the permission entries _generate_opencode_config() adds.
 EXTRA_MOUNTS_ROOT = "/mnt"
 
 # The container's podman network mode. "none" is the isolation guarantee, and
@@ -255,15 +247,23 @@ def check_opencode_args(args: list[str], mode: str = "tui") -> None:
             )
 
 
-def _generate_opencode_config(base_url: str) -> dict:
+def _generate_opencode_config(base_url: str, extra_mounts: list[Path] | None = None) -> dict:
     """Builds the single opencode.json ocbox feeds OpenCode, sandboxed or not.
 
-    Only the provider is generated, because it is the only part ocbox owns:
-    `base_url` is the relay bridging a sandboxed container to the user's LLM,
-    or - in --no-sandbox mode - opencode.jsonc's own baseURL, no relay involved.
-    Agents and skills aren't here - they're files placed at the locations
-    OpenCode already searches - and the models belong to the user's own
-    opencode.jsonc, layered in as OpenCode's global config.
+    Only what depends on the run is generated. `base_url` is the relay bridging
+    a sandboxed container to the user's LLM, or - in --no-sandbox mode -
+    opencode.jsonc's own baseURL, no relay involved. Agents and skills aren't
+    here - they're files placed at the locations OpenCode already searches - and
+    the models belong to opencode.jsonc, layered in as OpenCode's global config.
+
+    The other run-dependent part is access to --mount's directories. OpenCode
+    gates every path outside the project behind `permission.external_directory`,
+    and the team's opencode.jsonc denies them all (`"*": "deny"`), so without an
+    entry a mounted directory is visible in the container but refused to every
+    tool. Verified against opencode 1.18.29 with a stub LLM issuing read, write
+    and bash calls on /mnt/<name>: all refused under the team rules, all allowed
+    with these entries - which OpenCode merges into the team's rules rather than
+    replacing them (`opencode debug config` lists both).
 
     Key names verified against OpenCode's published schema
     (https://opencode.ai/config.json, checked at opencode 1.18.29). Getting one
@@ -274,7 +274,7 @@ def _generate_opencode_config(base_url: str) -> dict:
     the output to say so - so re-check any change here against
     `opencode debug config`, which prints what actually survived.
     """
-    return {
+    config: dict = {
         "provider": {
             "local": {
                 "npm": "@ai-sdk/openai-compatible",
@@ -282,6 +282,13 @@ def _generate_opencode_config(base_url: str) -> dict:
             }
         }
     }
+    if extra_mounts:
+        config["permission"] = {
+            "external_directory": {
+                f"{EXTRA_MOUNTS_ROOT}/{path.name}/**": "allow" for path in extra_mounts
+            }
+        }
+    return config
 
 
 class LlmEndpointError(ConfigError):
@@ -421,7 +428,7 @@ def run(
         cfg, non_interactive=non_interactive, cli_apt=cli_apt, cli_uv=cli_uv
     )
     fingerprint = image.packages_fingerprint(
-        apt_pkgs, uv_pkgs, cfg.base_image, image.containerfile_fingerprint(cfg.base_os)
+        apt_pkgs, uv_pkgs, cfg.base_image, image.base_fingerprint(cfg.base_os)
     )
     project_tag = f"ocbox/project-{slug}:latest"
 
@@ -448,6 +455,7 @@ def run(
         auth.write_env_file(env_file, token)
 
     container_llm_port = 8081
+    relay_url = f"http://127.0.0.1:{container_llm_port}{llm.path}"
     container_web_port = cfg.container_web_port
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
@@ -468,7 +476,7 @@ def run(
     opencode_config_path = run_dir / "opencode.json"
     opencode_config_path.write_text(
         json.dumps(
-            _generate_opencode_config(f"http://127.0.0.1:{container_llm_port}{llm.path}"), indent=2
+            _generate_opencode_config(relay_url, list(extra_mounts or [])), indent=2
         )
     )
 

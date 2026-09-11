@@ -70,10 +70,13 @@ class PodmanClient:
         *,
         context_dir: str = ".",
         network: bool = True,
+        no_cache: bool = False,
     ) -> None:
         args = ["build", "-t", tag, "-f", "-"]
         if not network:
             args += ["--network", "none"]
+        if no_cache:
+            args.append("--no-cache")
         args.append(context_dir)
         try:
             subprocess.run(

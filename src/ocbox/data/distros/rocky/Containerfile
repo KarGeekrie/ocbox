@@ -14,10 +14,9 @@ RUN dnf install -y ca-certificates curl python3 \
 RUN curl -LsSf https://astral.sh/uv/install.sh | bash -s -- --no-modify-path \
     && mv /root/.local/bin/uv /root/.local/bin/uvx /usr/local/bin/
 
-# OpenCode agent CLI.
-# NOTE: install method below is the officially documented install script as of
-# this writing. Pin/verify against the exact version you want before relying
-# on this in production - see the project plan's open question #3.
+# OpenCode agent CLI. Like uv above, deliberately unpinned: every ocbox update
+# rebuilds this image without the layer cache (image.ensure_base_image), and
+# that is when the team moves to the current uv and OpenCode.
 RUN curl -fsSL https://opencode.ai/install | bash \
     && mv "$HOME"/.opencode/bin/opencode /usr/local/bin/opencode
 

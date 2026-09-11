@@ -1,7 +1,9 @@
+import subprocess
 from unittest.mock import MagicMock
 
 import pytest
 
+import ocbox
 from ocbox import image
 
 
@@ -31,8 +33,8 @@ def test_packages_fingerprint_differs_when_base_content_changes() -> None:
     assert a != b
 
 
-def test_containerfile_fingerprint_is_deterministic() -> None:
-    assert image.containerfile_fingerprint() == image.containerfile_fingerprint()
+def test_base_fingerprint_is_deterministic() -> None:
+    assert image.base_fingerprint() == image.base_fingerprint()
 
 
 def test_repo_config_dir_points_at_the_repo_root_directory() -> None:
@@ -62,20 +64,20 @@ def test_all_supported_distros_have_a_containerfile_on_disk() -> None:
         assert path.is_file(), f"missing Containerfile for BASE_OS={base_os!r}"
 
 
-def test_containerfile_fingerprint_differs_between_distros() -> None:
-    fingerprints = {base_os: image.containerfile_fingerprint(base_os) for base_os in image.DISTROS}
+def test_base_fingerprint_differs_between_distros() -> None:
+    fingerprints = {base_os: image.base_fingerprint(base_os) for base_os in image.DISTROS}
     assert len(set(fingerprints.values())) == len(fingerprints)
 
 
-def test_containerfile_fingerprint_rejects_unknown_distro() -> None:
+def test_base_fingerprint_rejects_unknown_distro() -> None:
     with pytest.raises(ValueError, match="Unknown BASE_OS"):
-        image.containerfile_fingerprint("arch")
+        image.base_fingerprint("arch")
 
 
 def test_ensure_base_image_skips_build_if_present_and_hash_matches() -> None:
     podman = MagicMock()
     podman.image_exists.return_value = True
-    podman.image_label.return_value = image.containerfile_fingerprint()
+    podman.image_label.return_value = image.base_fingerprint()
     image.ensure_base_image(podman, "ocbox/base:latest")
     podman.build.assert_not_called()
 
@@ -87,7 +89,7 @@ def test_ensure_base_image_builds_if_missing() -> None:
     podman.build.assert_called_once()
     args, _kwargs = podman.build.call_args
     assert args[1] == "ocbox/base:latest"
-    assert image.CONTAINERFILE_HASH_LABEL in args[0]
+    assert image.BASE_FINGERPRINT_LABEL in args[0]
 
 
 def test_ensure_base_image_rebuilds_when_content_hash_stale() -> None:
@@ -133,7 +135,7 @@ def test_ensure_base_image_distro_switch_forces_rebuild() -> None:
     changed, since the content hash now points at a different Containerfile."""
     podman = MagicMock()
     podman.image_exists.return_value = True
-    podman.image_label.return_value = image.containerfile_fingerprint("debian")
+    podman.image_label.return_value = image.base_fingerprint("debian")
     image.ensure_base_image(podman, "ocbox/base:latest", "ubuntu")
     podman.build.assert_called_once()
 
@@ -208,3 +210,34 @@ def test_repo_local_dir_is_gitignored() -> None:
     """It holds an OpenCode binary and OpenCode's node_modules - never to be committed."""
     gitignore = (image.repo_config_dir().parent / ".gitignore").read_text().splitlines()
     assert "/.ocbox/" in gitignore
+
+
+def test_base_fingerprint_changes_with_the_ocbox_revision(monkeypatch) -> None:
+    """An ocbox update rebuilds the base image even when its files are
+    identical, which is how the unpinned uv and OpenCode get refreshed."""
+    monkeypatch.setattr(image, "ocbox_revision", lambda: "aaaa")
+    before = image.base_fingerprint()
+    monkeypatch.setattr(image, "ocbox_revision", lambda: "bbbb")
+    assert image.base_fingerprint() != before
+
+
+def test_ensure_base_image_builds_without_the_layer_cache() -> None:
+    """A cached build would reuse the `curl | bash` layers, and with them the
+    previous uv and OpenCode."""
+    podman = MagicMock()
+    podman.image_exists.return_value = False
+    image.ensure_base_image(podman, "ocbox/base:latest")
+    assert podman.build.call_args.kwargs["no_cache"] is True
+
+
+def test_ocbox_revision_is_this_checkouts_commit() -> None:
+    repo = image.repo_config_dir().parent
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert image.ocbox_revision() == head
+
+
+def test_ocbox_revision_outside_a_checkout_is_the_package_version(monkeypatch) -> None:
+    monkeypatch.setattr(image.update_check, "revision", lambda repo: None)
+    assert image.ocbox_revision() == ocbox.__version__
