@@ -151,6 +151,38 @@ opencode 1.18.29 and its published schema:
   `~/.config/opencode/AGENTS.md` or the project's own `AGENTS.md`, generated
   by `/init` inside an OpenCode session. A textbook case of the silent no-op
   this file warns about: it looked configured and did nothing.
+- **Global and project `AGENTS.md` are combined, not either/or**: checked by
+  pointing OpenCode at a stub OpenAI-compatible server that records every
+  request body, then searching those bodies for a marker placed in each file.
+  With both files present, both markers reach the model; with only the global
+  one, it still does. `/docs/rules/`'s "the first matching file wins in each
+  category" means `AGENTS.md` beats `CLAUDE.md` *in the same location*, not
+  that a project file shadows the global one - the V2 docs say it outright:
+  "OpenCode combines the files and does not resolve conflicts between them".
+  ocbox ships the team's global file as `opencode-config/AGENTS.md`.
+- **`OPENCODE_CONFIG_DIR`**, which the whole of `--no-sandbox`'s config wiring
+  rests on: agents, skills and `opencode.jsonc` all load from a directory given
+  this way, a config layered over it with `OPENCODE_CONFIG` merges rather than
+  replacing it, and an `AGENTS.md` inside it is sent as the global one (same
+  request-recording check). OpenCode also writes into that directory - a
+  `.gitignore`, then `node_modules` and `package.json` once plugins load -
+  which is why ocbox assembles it in its own state dir, not in the checkout.
+- **What `--no-sandbox` still takes from the user's own
+  `~/.config/opencode/`**: OpenCode reads that directory alongside
+  `OPENCODE_CONFIG_DIR` rather than instead of it - its DEBUG log lists both.
+  With a marker in each file under a throwaway `HOME`: the user's
+  `opencode.jsonc` is merged, the `OPENCODE_CONFIG_DIR` copy winning on a
+  conflicting key (`share` set both ways resolved to the team's value) while
+  user-only keys are kept; the user's `agents/` are merged; the user's
+  `AGENTS.md` is not sent at all, replaced by the one in `OPENCODE_CONFIG_DIR`.
+  An earlier README claimed the user's directory was neither read nor used in
+  this mode - wrong for everything except `AGENTS.md`.
+
+Two observables look usable for "does this reach the model?" and are not: the
+token counts in `opencode run --format json` (against Ollama they report the
+context size, 2048, whatever the prompt), and `opencode export <session>`
+(messages only, no system prompt). A stub LLM that records request bodies is
+the reliable check.
 
 Worth knowing when changing any of this: OpenCode ignores config keys it
 doesn't recognise instead of rejecting them, so a wrong key name disables a

@@ -194,3 +194,7 @@ def test_build_project_image_uses_dnf_for_rocky(tmp_path) -> None:
     containerfile_text = podman.build.call_args[0][0]
     assert "dnf install -y git" in containerfile_text
     assert "apt-get" not in containerfile_text
+
+
+def test_repo_config_dir_ships_the_team_agents_md() -> None:
+    assert (image.repo_config_dir() / "AGENTS.md").is_file()

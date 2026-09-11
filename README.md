@@ -74,8 +74,10 @@ pip install -e .          # from a checkout, until this is published
 ```
 
 `opencode-config/` at the repo root holds what ocbox mounts into every
-sandbox - default agents, skills, and model list. Customize it right there in
-your clone; see "Default skills & agents" below.
+sandbox: the team's agents, skills, rules (`AGENTS.md`) and model list
+(`opencode.jsonc`). This repository is a preconfiguration for our team rather
+than a general-purpose package, so that directory arrives already filled in -
+see "Default skills & agents" below for what's in it.
 
 Create `~/.config/ocbox/conf.py`:
 
@@ -98,49 +100,23 @@ LLM_PORT = 11434           # e.g. Ollama's default port
 A project can override any of these by adding its own `ocbox.conf.py` in the
 project root.
 
-### Telling OpenCode which models you have
+### The team's OpenCode configuration
 
-`conf.py` says *where* your LLM server is; OpenCode also needs to know *what*
-it serves. Without that, it has an endpoint it can reach and nothing to
-select - the sandbox comes up but no model is usable.
+`opencode-config/opencode.jsonc` is **pre-filled and maintained centrally -
+don't edit it.** It already declares the team's LLM provider and models, the
+permissions and the defaults every sandbox should share; changing it for one
+person would quietly make their sandbox behave differently from everyone
+else's. If something in it needs to change, that's a reviewed commit to this
+repository.
 
-Edit `opencode-config/opencode.jsonc` in your clone (or create
-`~/.config/ocbox/opencode.jsonc`, which takes priority when present - useful
-if you'd rather keep it out of the repo):
+Since both mention the LLM, here is what `conf.py` and this file each do:
+`conf.py` says *where* the LLM server is, for the relay ocbox runs;
+`opencode.jsonc` tells OpenCode *what* that server serves. In web/`--tui` mode
+ocbox overrides the file's `baseURL` to point at the relay; in `--no-sandbox`
+mode the file is used exactly as written (see "Running without a sandbox").
 
-```jsonc
-{
-  // Comments are fine - this is JSONC.
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "local": {
-      "options": {
-        // Only read in --no-sandbox mode - see below. Ignored (and safe to
-        // leave as a placeholder) in web/--tui, where ocbox controls it.
-        "baseURL": "http://<IP>:<PORT>/v1"
-      },
-      "models": {
-        // Key = the model id exactly as your server reports it
-        // (`ollama list`, or curl http://<host>:<port>/v1/models).
-        "qwen2.5-coder:7b": { "name": "Qwen2.5 Coder 7B" }
-      }
-    }
-  }
-}
-```
-
-ocbox mounts this as OpenCode's *global* config, which sits below ocbox's own
-generated config in OpenCode's precedence order. Everything you put here is
-merged in, but in web/`--tui` mode ocbox keeps control of
-`provider.local.options.baseURL` - that points at the relay reaching your
-LLM, so setting it yourself has no effect there. Anything else from
-<https://opencode.ai/config.json> works here: a default `model`, `theme`,
-`permission` rules, and so on. (In `--no-sandbox` mode this file is used
-exactly as written, `baseURL` included - see "Running without a sandbox"
-below.)
-
-Check it landed with `opencode models` from inside a sandbox - you want to see
-`local/...` lines. `--opencode-config PATH` overrides the file per run.
+To check it landed, run `opencode models` inside a sandbox - you should see
+`local/...` lines.
 
 ### Choosing the sandbox's OS
 
@@ -177,7 +153,8 @@ OpenCode is ready.
 ```
 
 Open the URL, sign in with the printed credentials, and OpenCode is running
-against `myapp/`, isolated from the rest of your machine.
+against `myapp/`, isolated from the rest of your machine. "Workflow" below
+covers what to do from there.
 
 ### Mounting extra working directories
 
@@ -241,21 +218,28 @@ touch anything this user can), no network restriction (no relay, no
 just want ocbox's install/config convenience without the container overhead;
 reach for the default web mode or `--tui` whenever that trust doesn't hold.
 
-**Your own OpenCode config is left completely alone.** ocbox assembles
-`opencode-config/`'s agents, skills and model config (or your
+**ocbox writes nothing into your OpenCode config.** It assembles
+`opencode-config/`'s agents, skills, team `AGENTS.md` and model config (or your
 `--agents-dir`/`--skills-dir`/`--opencode-config` overrides) into a directory
 under its own state dir, then points OpenCode at it with
-`OPENCODE_CONFIG_DIR` - nothing is written to, or read from,
-`~/.config/opencode/`. OpenCode installs plugin dependencies into whatever
+`OPENCODE_CONFIG_DIR`. OpenCode installs plugin dependencies into whatever
 config directory it is given, which is another reason that lands in ocbox's
 state dir rather than in your checkout or your home.
 
-The flip side is worth knowing: because ocbox supplies the *whole* config
-directory, a global OpenCode config you already have is **bypassed, not
-merged** - your own global agents and `AGENTS.md` won't be visible in this
-mode. That mirrors what a sandboxed run does, where only what ocbox mounts
-exists. Project-level `AGENTS.md` files in the directory you run from are
-unaffected and still load.
+OpenCode still *reads* its usual `~/.config/opencode/` alongside that
+directory, though, so a personal global config you already have is not simply
+ignored. Measured against opencode 1.18.29 with a marker in each file:
+
+| Your own `~/.config/opencode/...` | In `--no-sandbox` mode |
+|---|---|
+| `opencode.jsonc` | Merged in. On a key both files set, the team's value wins; keys only yours sets are kept |
+| `agents/` | Merged in: your agents appear next to the team's |
+| `AGENTS.md` | Not used: the team's `AGENTS.md` takes its place |
+
+So unlike a sandbox, where only what ocbox mounts exists, `--no-sandbox` is not
+guaranteed to behave identically for everyone on the team - a personal global
+config comes along. Project-level `AGENTS.md` files in the directory you run
+from load as usual.
 
 (OpenCode itself may still create `~/.config/opencode/` and drop a small
 housekeeping `.gitignore` there. That happens whether or not ocbox is
@@ -339,16 +323,101 @@ Useful flags:
 | `--no-sandbox` | Run OpenCode directly on the host - no Podman, no isolation at all |
 | `-- ARGS...` | Everything after `--` is forwarded to OpenCode itself |
 
+## Workflow
+
+This follows OpenCode's own recommended workflow (<https://opencode.ai/docs/>),
+adapted to how ocbox sets things up.
+
+### 0. The configuration is already in place
+
+There is nothing to configure before starting. The team's `opencode.jsonc`
+(provider, models, permissions), agents, skills and rules ship in
+`opencode-config/` and are mounted into every sandbox - see "The team's
+OpenCode configuration" above. Don't adjust them for one project: guidance
+specific to a project goes in that project's own `AGENTS.md`, which is the
+next step.
+
+### 1. Initialise the project with `/init`, then review what it wrote
+
+The first time you work on a repository, run `/init` inside OpenCode - it is a
+command in the session, not `opencode init` on the command line. It reads the
+code and writes an `AGENTS.md` at the project root: build and test commands,
+architecture, conventions. **Read it and correct it before relying on it.**
+It is a first draft inferred from what the code looks like, and anything it
+got wrong is repeated to the model on every turn afterwards. Then commit it,
+so everyone working on the repository gets the same guidance.
+
+That file is the *project* half of two layers of rules. OpenCode sends both,
+rather than letting one replace the other:
+
+| Layer | File | Holds | Changed by |
+|---|---|---|---|
+| Team | `opencode-config/AGENTS.md` in this repo, mounted as `~/.config/opencode/AGENTS.md` | Rules for every project | A commit to this repository |
+| Project | `AGENTS.md` at the project root, written by `/init` | This codebase's commands, architecture, conventions | A commit to that project |
+
+How the two layers interact:
+
+- **Both reach the model, together.** Neither overrides the other.
+- **Nothing resolves conflicts between them.** If the team file says one thing
+  and the project file the opposite, the model receives both and has to guess.
+  So don't restate team rules in a project file, and when a project genuinely
+  needs an exception, say so explicitly: "unlike the team default, this
+  project...".
+- **Put each rule at the most general level where it holds.** True for all
+  our code: the team file. True for one codebase: that project's file.
+- **After editing either file, start a new session** so the change is
+  certainly in effect.
+
+The team file currently carries one rule. It also shows the shape to aim for -
+short, imperative, and explicit about the awkward case:
+
+```markdown
+## Python
+
+Never run Python outside a virtual environment. If the project already has
+one (`.venv/`, `venv/`), activate it. If it doesn't, ask before creating
+one rather than installing into the system interpreter.
+```
+
+Two things that look like alternatives and aren't. OpenCode's `instructions`
+config key is parsed but never resolved, so files listed there never reach the
+model. And in `--no-sandbox` mode your own `~/.config/opencode/AGENTS.md` is
+bypassed, because ocbox supplies the team's file in its place (your personal
+global agents and `opencode.jsonc` do still merge in - see "Running without a
+sandbox").
+
+### 2. Plan, then build
+
+For anything beyond a small change, work in two passes, as OpenCode
+recommends:
+
+1. **Switch to the `plan` agent** (Tab in the terminal UI). Its edit tools
+   are disabled, so it investigates and proposes without changing files.
+2. **Describe what you want in detail.** OpenCode's advice is to talk to it
+   like a junior developer new to the codebase. Point at files with `@`.
+3. **Iterate on the plan until it's right**: correct wrong assumptions, add
+   context, push back on an approach. This is the cheap moment to change your
+   mind.
+4. **Switch to `build`** (Tab again) and ask it to carry out the plan.
+5. **Review the result.** `/undo` reverts the last change - repeat it to go
+   further back - and `/redo` restores it.
+
+For a small, well-defined change, skip planning and ask `build` directly,
+naming the files involved.
+
+When you only want to **talk something through** - how a module works, which
+of two designs to choose - use `chat`: it reads the code but can neither edit
+files nor run commands, so nothing changes by accident. `review` does the same
+for finding bugs in a change before it lands.
+
 ## Default skills & agents
 
-`opencode-config/` at the repo root - not buried under `src/` - holds
-everything you want available in every sandbox: `agents/` and `skills/`,
-instead of reconfiguring OpenCode per project, plus the `opencode.jsonc`
-described above (`~/.config/ocbox/opencode.jsonc` still takes priority over
-it when present). It's meant to be edited directly in your clone:
-`git clone`, drop in your own agents/skills and models, `ocbox` picks them up
-from there - no separate install step. Point `--agents-dir`/`--skills-dir` at
-other directories to override per invocation instead.
+`opencode-config/` at the repo root - not buried under `src/` - holds what
+every sandbox shares: `agents/`, `skills/`, the team rules in `AGENTS.md`, and
+the `opencode.jsonc` described above. Like that file, it is the team's
+configuration, changed through commits to this repository rather than per
+person. `--agents-dir`/`--skills-dir` exist for trying something out in a
+single run without touching it.
 
 Agents and skills are found because of *where* they are mounted - OpenCode's
 own global config directory - rather than through any config key, so the
@@ -363,6 +432,10 @@ own global config directory - rather than through any config key, so the
   `~/.config/opencode/skills`, the documented location for global skills, so
   the same mechanism as agents - no config key involved. See
   `opencode-config/skills/README.md`.
+- **Team rules**: `AGENTS.md`, mounted as OpenCode's *global*
+  `~/.config/opencode/AGENTS.md` and combined with each project's own - see
+  "Workflow" below. ocbox skips the mount if the file is ever removed.
+
 ocbox ships four agents: `chat` (discussion only - editing *and* bash denied,
 since denying edits alone still leaves `echo x > file`), `review` (finds bugs;
 editing denied, bash gated on your approval so `git diff` still works), plus
@@ -377,46 +450,6 @@ sandbox, and the generated config with `opencode debug config`. OpenCode
 ignores config keys and agent files it doesn't recognise without complaining,
 so a mistake shows up as a feature that quietly does nothing rather than an
 error.
-
-## Standing instructions: AGENTS.md
-
-Rules you want applied on every turn - "never run Python outside a venv",
-"this project uses pnpm, not npm" - go in an `AGENTS.md`, not in ocbox's
-config. OpenCode reads two of them and combines them:
-
-- `~/.config/opencode/AGENTS.md` for guidance that applies to everything you
-  work on.
-- `AGENTS.md` in the project itself, walking up from the working directory.
-  Committing it shares the rules with everyone on the repo.
-
-**Start a new project by running `/init` inside OpenCode.** It reads the
-repository and writes an `AGENTS.md` covering the build commands,
-architecture and conventions it finds. Do that once per project, then edit
-the file by hand as things change - an empty or stale `AGENTS.md` is the
-usual reason an agent keeps making the same wrong assumption. Note that
-`/init` is a command *inside* an OpenCode session; there is no
-`opencode init` on the command line.
-
-Worth adding by hand, as an example of the kind of standing rule that pays
-for itself:
-
-```markdown
-## Python
-
-Never run Python outside a virtual environment. If the project already has
-one (`.venv/`, `venv/`), activate it. If it doesn't, ask before creating
-one rather than installing into the system interpreter.
-```
-
-ocbox deliberately ships no mechanism of its own for this. OpenCode's
-`instructions` config key looks like it should do the job, and ocbox briefly
-carried an `opencode-config/instructions/` directory wired to it - but
-OpenCode's own V2 docs state that the key "currently parses and retains this
-field but does not resolve its entries into instruction sources", so
-"local files, glob patterns, and HTTP or HTTPS URLs in `instructions`
-therefore do not reach the model yet". It survives `opencode debug config`
-while doing nothing at all, which is exactly the silent-no-op failure this
-README warns about above. `AGENTS.md` is the mechanism that actually works.
 
 ## How the isolation works
 

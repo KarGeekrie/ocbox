@@ -308,3 +308,35 @@ def test_daemonize_child_detaches_and_redirects_stdio(monkeypatch, tmp_path) -> 
     assert ("dup2", 99, 1) in calls  # stdout -> the log file
     assert ("dup2", 99, 2) in calls  # stderr -> the log file
     assert calls.count(("close", 99)) == 2  # devnull fd and log fd, each closed after dup2'ing
+
+
+def test_argv_mounts_global_agents_md_when_present() -> None:
+    argv = build_podman_run_argv(_plan(global_agents_md=Path("/repo/AGENTS.md")))
+    assert f"/repo/AGENTS.md:{sandbox.GLOBAL_AGENTS_MD_MOUNT}:ro" in argv
+    assert sandbox.GLOBAL_AGENTS_MD_MOUNT == "/home/ocbox/.config/opencode/AGENTS.md"
+
+
+def test_argv_mounts_global_agents_md_after_the_home_volume_it_nests_in() -> None:
+    argv = build_podman_run_argv(_plan(global_agents_md=Path("/repo/AGENTS.md")))
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    mount = f":{sandbox.GLOBAL_AGENTS_MD_MOUNT}:ro"
+    agents_md = next(i for i, a in enumerate(argv) if a.endswith(mount))
+    assert home_volume < agents_md
+
+
+def test_argv_skips_global_agents_md_when_absent() -> None:
+    """Optional team content: no file must mean no bind mount of a path that
+    isn't there."""
+    argv = build_podman_run_argv(_plan())
+    assert not any(a.endswith(f":{sandbox.GLOBAL_AGENTS_MD_MOUNT}:ro") for a in argv)
+
+
+def test_resolve_global_agents_md_returns_the_file_when_present(tmp_path, monkeypatch) -> None:
+    (tmp_path / "AGENTS.md").write_text("# rules\n")
+    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
+    assert sandbox._resolve_global_agents_md() == tmp_path / "AGENTS.md"
+
+
+def test_resolve_global_agents_md_is_none_when_absent(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
+    assert sandbox._resolve_global_agents_md() is None

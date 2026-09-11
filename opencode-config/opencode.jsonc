@@ -1,29 +1,27 @@
 {
-  // ocbox mounts this file into every sandbox as OpenCode's *global* config,
-  // and (in --no-sandbox mode) symlinks it straight into OpenCode's real
-  // global config directory.
+  // TEAM CONFIGURATION - maintained centrally, do not edit.
   //
-  // provider.local.options.baseURL behaves differently depending on mode:
-  //   - web/--tui (sandboxed): ocbox always overrides it to point at the
-  //     relay reaching your LLM - whatever you put here is ignored there.
-  //   - --no-sandbox: nothing overrides it. OpenCode uses this value as-is,
-  //     so it must be your LLM server's real, directly-reachable address.
-  // Fill in <IP>:<PORT> below for --no-sandbox to work; it's unused (and
-  // safely ignored) in the sandboxed modes.
+  // This repository is a preconfigured setup for our team, not a general-
+  // purpose package: this file already declares the team's provider, models,
+  // permissions and defaults. Changes go through a reviewed commit here, so
+  // every sandbox stays identical.
   //
-  // Copy this to ~/.config/ocbox/opencode.jsonc and edit that instead if you
-  // don't want it tracked in the repo; ocbox uses that copy when it exists,
-  // this file otherwise. Point --opencode-config at another file to override
-  // per invocation.
+  // How ocbox uses it: mounted into every sandbox as OpenCode's *global*
+  // config, and in --no-sandbox mode placed in the config directory ocbox
+  // hands OpenCode through OPENCODE_CONFIG_DIR.
+  //
+  // provider.local.options.baseURL depends on the mode:
+  //   - web/--tui (sandboxed): ocbox overrides it to point at the relay
+  //     reaching the LLM - the value here is ignored.
+  //   - --no-sandbox: used as-is, so it must be the LLM server's real,
+  //     directly-reachable address.
   //
   // Verified against opencode 1.18.29: every key below survives
-  // `opencode debug config`. Check any key you add the same way - OpenCode
-  // drops keys it doesn't recognise silently, without an error, so a typo
-  // reads as a setting that quietly does nothing.
+  // `opencode debug config`. OpenCode drops keys it doesn't recognise
+  // silently, so check any key added the same way.
   //
-  // Standing instructions do NOT belong here: OpenCode's `instructions` key
-  // is parsed but never resolved, so its contents never reach the model.
-  // Use AGENTS.md instead - see the README.
+  // Standing instructions do NOT belong here - OpenCode's `instructions` key
+  // is parsed but never resolved. Team rules go in opencode-config/AGENTS.md.
 
   "$schema": "https://opencode.ai/config.json",
   "lsp": true,

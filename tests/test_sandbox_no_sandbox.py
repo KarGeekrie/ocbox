@@ -67,11 +67,15 @@ def test_find_or_install_raises_if_still_missing_after_install(tmp_path, monkeyp
 @pytest.fixture
 def mocked_no_sandbox_env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    # The assembled config dir lives under XDG_STATE_HOME; without this the
+    # tests would write symlinks into the developer's real ~/.local/state.
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
     repo_config = tmp_path / "opencode-config"
     (repo_config / "agents").mkdir(parents=True)
     (repo_config / "skills").mkdir(parents=True)
     (repo_config / "opencode.jsonc").write_text('{"provider": {"local": {}}}')
+    (repo_config / "AGENTS.md").write_text("# Team rules\n")
 
     # USER_CONFIG_PATH is an absolute path off the real HOME, so without this
     # the test picks up the developer's own ~/.config/ocbox/opencode.jsonc and
@@ -133,8 +137,9 @@ def test_run_no_sandbox_points_opencode_at_an_assembled_config_dir(
 def test_run_no_sandbox_never_touches_the_users_opencode_config(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
-    """The whole point of the env-var approach: ~/.config/opencode is neither
-    read nor written, so a config the user already has is left alone."""
+    """ocbox writes nothing under ~/.config/opencode, so a config the user
+    already has is left exactly as it was. OpenCode itself still reads it -
+    see run_no_sandbox's docstring - but that is a read, not a write by ocbox."""
     users_config = tmp_path / "config" / "opencode"
     users_config.mkdir(parents=True)
     (users_config / "agents").mkdir()
@@ -173,3 +178,27 @@ def test_run_no_sandbox_prefers_the_users_own_opencode_jsonc(
     _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
     linked = Path(env["OPENCODE_CONFIG_DIR"]) / "opencode.jsonc"
     assert linked.resolve() == user_file.resolve()
+
+
+def test_run_no_sandbox_assembled_dir_carries_the_team_agents_md(mocked_no_sandbox_env) -> None:
+    """An AGENTS.md inside OPENCODE_CONFIG_DIR is what OpenCode sends as the
+    global one - verified against a real binary by recording request bodies."""
+    sandbox.run_no_sandbox()
+
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    linked = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
+    assert linked.resolve() == (mocked_no_sandbox_env["repo_config"] / "AGENTS.md").resolve()
+
+
+def test_run_no_sandbox_drops_the_agents_md_link_once_the_file_is_gone(
+    mocked_no_sandbox_env,
+) -> None:
+    sandbox.run_no_sandbox()
+    (mocked_no_sandbox_env["repo_config"] / "AGENTS.md").unlink()
+
+    sandbox.run_no_sandbox()
+
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    link = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
+    assert not link.is_symlink()
+    assert not link.exists()
