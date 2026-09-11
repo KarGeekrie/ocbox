@@ -14,6 +14,11 @@
 > disponible et utilisé pour rejouer les scénarios d'isolation.
 > Branche : `review/delta-fonctionnel`.
 
+> **Statut :** les 12 points ci-dessous ont reçu un correctif dans les commits
+> suivants de cette même branche (voir la description de la PR pour la
+> correspondance point→correctif). `pytest` **244 passed, 6 skipped**,
+> `ruff` clean, et la suite d'intégration Podman **6 passed** après correctifs.
+
 Légende de sévérité :
 🔴 bug fonctionnel ou risque sécurité · 🟠 écart doc/code notable ·
 🟡 comportement surprenant / robustesse · 🟢 conforme, noté pour mémoire.

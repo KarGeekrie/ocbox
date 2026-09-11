@@ -3,6 +3,7 @@ OPENCODE_SERVER_PASSWORD / OPENCODE_SERVER_USERNAME)."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 from pathlib import Path
@@ -19,13 +20,20 @@ def write_env_file(path: Path, token: str, username: str = DEFAULT_USERNAME) -> 
 
     Creates the file with mode 0600 from the moment it exists - never a
     world-readable window - since this is a secret passed to the container.
+
+    Removes any pre-existing entry first and opens with O_NOFOLLOW|O_EXCL, so a
+    symlink planted at this path by a compromised sandbox (which shares the run
+    directory, read-write, at the same uid) can't redirect this write onto a
+    host file.
     """
     lines = [
         f"OPENCODE_SERVER_USERNAME={username}",
         f"OPENCODE_SERVER_PASSWORD={token}",
         "",
     ]
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     try:
         os.write(fd, "\n".join(lines).encode())
     finally:

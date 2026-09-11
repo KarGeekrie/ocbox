@@ -119,10 +119,10 @@
     "together", "xai", "deepseek", "huggingface", "opencode"
   ],
   "permission": {
+    // Every path outside the project is denied by default. --mount adds a
+    // per-run "/mnt/<name>/**": "allow" on top of this (see ocbox's sandbox.py).
     "external_directory": {
-      "*": "deny",
-      "~/.config/opencode/skills/code-review/*": "allow",
-      "~/.config/opencode/skills/sota-review/*": "allow"
+      "*": "deny"
     },
     "doom_loop": "deny"
 

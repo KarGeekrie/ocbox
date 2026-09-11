@@ -102,7 +102,14 @@ A project can override any of these with its own `ocbox.conf.py` at its root.
 The LLM's address doesn't belong in either: it is the `baseURL` in
 `opencode-config/opencode.jsonc` (see below). A `conf.py` that still sets
 `LLM_HOST` or `LLM_PORT` is rejected with an error pointing there, rather than
-silently ignored.
+silently ignored. An unrecognised setting name (a typo like `MEMORY_LIMITS`) is
+ignored, with a warning naming it; the list settings must be actual lists
+(`EXTRA_APT_DEFAULT = ["git"]`, not `"git"`).
+
+> **Note:** both `conf.py` files are ordinary Python that ocbox *executes* on
+> the host, before any sandbox exists - a project's `ocbox.conf.py` runs simply
+> by `cd`-ing into that project and launching `ocbox`. Treat an untrusted
+> repository's `ocbox.conf.py` as you would any code you're about to run.
 
 ### The team's OpenCode configuration
 
@@ -579,7 +586,13 @@ the gitignored `.ocbox/update-check.json`. A failed fetch - offline, no SSH
 agent - never blocks a run by itself, but a newer tag that has already been
 fetched does, online or not. `OCBOX_SKIP_UPDATE_CHECK=1` turns the check off
 entirely: an escape hatch for when an update can't be applied right away, not a
-way to stay behind.
+way to stay behind. (Any non-empty value disables it - `=0` and `=false` count
+too; unset the variable to re-enable the check.)
+
+Each rebuild leaves the previous base image, and the previous per-project
+images, untagged behind it. They pile up over time; reclaim the space with
+`podman image prune` (or `podman system prune`) when convenient - ocbox never
+deletes images itself.
 
 ## Development
 

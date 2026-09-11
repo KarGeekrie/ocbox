@@ -97,3 +97,35 @@ def test_base_os_unknown_value_rejected(tmp_path: Path) -> None:
     conf.write_text("BASE_OS = 'arch'\n")
     with pytest.raises(ConfigError, match="not supported"):
         load_config(explicit_path=conf)
+
+
+def test_extra_apt_default_as_a_bare_string_is_rejected(tmp_path: Path) -> None:
+    """`list("git")` would silently become ['g','i','t'] - three bogus packages."""
+    conf = tmp_path / "conf.py"
+    conf.write_text("EXTRA_APT_DEFAULT = 'git'\n")
+    with pytest.raises(ConfigError, match="must be a list"):
+        load_config(explicit_path=conf)
+
+
+def test_extra_uv_default_as_a_bare_string_is_rejected(tmp_path: Path) -> None:
+    conf = tmp_path / "conf.py"
+    conf.write_text("EXTRA_UV_DEFAULT = 'ruff'\n")
+    with pytest.raises(ConfigError, match="must be a list"):
+        load_config(explicit_path=conf)
+
+
+def test_unrecognised_setting_is_ignored_with_a_warning(tmp_path: Path, capsys) -> None:
+    conf = tmp_path / "conf.py"
+    conf.write_text("MEMORY_LIMITS = '2g'\n")  # typo for MEMORY_LIMIT
+    cfg = load_config(explicit_path=conf)
+    assert cfg.memory_limit is None
+    err = capsys.readouterr().err
+    assert "MEMORY_LIMITS" in err
+    assert "MEMORY_LIMIT" in err
+
+
+def test_known_settings_do_not_warn(tmp_path: Path, capsys) -> None:
+    conf = tmp_path / "conf.py"
+    conf.write_text("import os\nBASE_OS = 'ubuntu'\nPIDS_LIMIT = 256\n")
+    load_config(explicit_path=conf)
+    assert "unrecognised" not in capsys.readouterr().err
