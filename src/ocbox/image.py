@@ -9,9 +9,10 @@ import importlib.resources
 import shlex
 from pathlib import Path
 
+from ocbox import __version__, update_check
 from ocbox.podman_client import PodmanClient
 
-CONTAINERFILE_HASH_LABEL = "ocbox.containerfile_hash"
+BASE_FINGERPRINT_LABEL = "ocbox.base_fingerprint"
 
 # Each entry names the packaged Containerfile variant under data/distros/
 # and the package manager `build_project_image` uses to install a project's
@@ -65,37 +66,45 @@ def _distro_containerfile_path(base_os: str) -> Path:
     return data_dir() / "distros" / base_os / "Containerfile"
 
 
-def containerfile_fingerprint(base_os: str = DEFAULT_BASE_OS) -> str:
-    """Hashes the selected distro's packaged Containerfile + relay.py +
-    entrypoint.sh together.
+def ocbox_revision() -> str:
+    """Which ocbox is running: this checkout's commit, or the package version
+    outside a git checkout."""
+    return update_check.revision(Path(__file__).resolve().parents[2]) or __version__
 
-    Used to detect that an ocbox upgrade shipped a changed base image
-    definition (or that BASE_OS itself changed), so a cached
-    `ocbox/base:latest` from a previous version/distro doesn't get used
-    forever - see ensure_base_image().
+
+def base_fingerprint(base_os: str = DEFAULT_BASE_OS) -> str:
+    """Identifies what a base image was built from: the selected distro's
+    Containerfile, relay.py, entrypoint.sh - and the ocbox revision.
+
+    The revision is what makes an ocbox update rebuild the images even when
+    none of those files changed. The Containerfiles install uv and OpenCode
+    unpinned, at whatever version is current when they are built, and an ocbox
+    update is when the team moves to newer ones - see ensure_base_image().
     """
     payload = _distro_containerfile_path(base_os).read_bytes()
     payload += (data_dir() / "relay.py").read_bytes()
     payload += (data_dir() / "entrypoint.sh").read_bytes()
+    payload += ocbox_revision().encode()
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
 def ensure_base_image(podman: PodmanClient, tag: str, base_os: str = DEFAULT_BASE_OS) -> None:
-    """Builds the base image (chosen distro + uv + OpenCode + relay.py) if
-    not already cached, or if the packaged Containerfile/relay.py/
-    entrypoint.sh have changed since the cached image was built - including
-    BASE_OS itself changing - (tracked via a content-hash label), so an
-    ocbox upgrade or a distro switch doesn't silently keep using a stale
-    base image forever.
+    """Builds the base image (chosen distro + uv + OpenCode + relay.py) unless
+    one built from the same base_fingerprint() is already there - so updating
+    ocbox, changing its image files, or switching BASE_OS rebuilds it, and
+    project images follow through packages_fingerprint().
     """
-    fingerprint = containerfile_fingerprint(base_os)
+    fingerprint = base_fingerprint(base_os)
     if podman.image_exists(tag) and (
-        podman.image_label(tag, CONTAINERFILE_HASH_LABEL) == fingerprint
+        podman.image_label(tag, BASE_FINGERPRINT_LABEL) == fingerprint
     ):
         return
     containerfile = _distro_containerfile_path(base_os).read_text()
-    containerfile += f"\nLABEL {CONTAINERFILE_HASH_LABEL}={fingerprint}\n"
-    podman.build(containerfile, tag, context_dir=str(data_dir()))
+    containerfile += f"\nLABEL {BASE_FINGERPRINT_LABEL}={fingerprint}\n"
+    # Without the layer cache: the `curl ... | bash` steps read the same as last
+    # time, so a cached build would reuse their layers and reinstall the very
+    # uv and OpenCode the rebuild is meant to refresh.
+    podman.build(containerfile, tag, context_dir=str(data_dir()), no_cache=True)
 
 
 def packages_fingerprint(

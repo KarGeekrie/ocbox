@@ -102,10 +102,29 @@ def test_generate_opencode_config_uses_the_given_base_url() -> None:
 
 def test_generate_opencode_config_generates_only_the_provider() -> None:
     """Everything else is a mounted file: agents and skills sit where OpenCode
-    already looks, models come from the user's own opencode.jsonc. The relay
-    endpoint is the only thing ocbox has to synthesise."""
+    already looks, models come from the user's own opencode.jsonc. Without
+    --mount, the relay endpoint is the only thing ocbox has to synthesise."""
     cfg = _generate_opencode_config("http://127.0.0.1:8081/v1")
     assert set(cfg) == {"provider"}
+
+
+def test_generate_opencode_config_allows_each_mounted_directory() -> None:
+    """The team's opencode.jsonc denies every external directory, and /mnt/ is
+    outside the project: without these entries every tool call on a --mount
+    directory is refused."""
+    cfg = _generate_opencode_config(
+        "http://127.0.0.1:8081/v1", [Path("/home/u/shared-lib"), Path("/srv/other")]
+    )
+    assert cfg["permission"] == {
+        "external_directory": {"/mnt/shared-lib/**": "allow", "/mnt/other/**": "allow"}
+    }
+
+
+def test_generate_opencode_config_leaves_other_external_directories_to_the_team() -> None:
+    """Merged over opencode.jsonc key by key, so a "*" entry here would
+    override the team's own default for every other path."""
+    cfg = _generate_opencode_config("http://127.0.0.1:8081/v1", [Path("/home/u/lib")])
+    assert "*" not in cfg["permission"]["external_directory"]
 
 
 def test_generate_opencode_config_uses_only_real_schema_keys() -> None:

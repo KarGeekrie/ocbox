@@ -170,6 +170,14 @@ def test_not_a_git_checkout_needs_nothing(tmp_path) -> None:
     assert update_check.check(plain, tmp_path / "state") == update_check.UpdateStatus()
 
 
+def test_revision_is_the_checkouts_commit(repos) -> None:
+    assert update_check.revision(repos["checkout"]) == git(repos["checkout"], "rev-parse", "HEAD")
+
+
+def test_revision_outside_a_checkout_is_none(tmp_path) -> None:
+    assert update_check.revision(tmp_path) is None
+
+
 # ---- update_command ------------------------------------------------------------
 
 

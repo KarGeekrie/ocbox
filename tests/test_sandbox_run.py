@@ -49,7 +49,7 @@ def mocked_run_env(tmp_path, monkeypatch):
     ):
         mock_image.repo_config_dir.return_value = data_dir
         mock_image.packages_fingerprint.return_value = "fp"
-        mock_image.containerfile_fingerprint.return_value = "basefp"
+        mock_image.base_fingerprint.return_value = "basefp"
         mock_image.image_exists.return_value = True
 
         mock_auth.generate_token.return_value = "test-token"
@@ -89,6 +89,17 @@ def test_run_defaults_to_no_extra_mounts(tmp_path, mocked_run_env) -> None:
 
     plan = mocked_run_env["launch"].call_args[0][0]
     assert plan.extra_mounts == []
+
+
+def test_run_lets_opencode_into_the_mounted_directories(tmp_path, mocked_run_env) -> None:
+    extra = tmp_path / "shared-lib"
+    extra.mkdir()
+
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, extra_mounts=[extra])
+
+    plan = mocked_run_env["launch"].call_args[0][0]
+    generated = json.loads(plan.opencode_config.read_text())
+    assert generated["permission"]["external_directory"] == {"/mnt/shared-lib/**": "allow"}
 
 
 def test_run_web_mode_generates_auth_and_passes_env_file(tmp_path, mocked_run_env) -> None:
