@@ -148,7 +148,7 @@ def test_build_project_image_generates_containerfile_with_packages(tmp_path) -> 
     assert "FROM ocbox/base:latest" in containerfile_text
     assert "apt-get install" in containerfile_text
     assert "git" in containerfile_text and "curl" in containerfile_text
-    assert "uv pip install --system ruff" in containerfile_text
+    assert "uv pip install --system --break-system-packages ruff" in containerfile_text
 
 
 def test_build_project_image_no_extra_layers_when_no_packages(tmp_path) -> None:

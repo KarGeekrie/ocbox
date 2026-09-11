@@ -146,6 +146,11 @@ def build_project_image(
         lines.append(_system_package_install_line(base_os, apt_pkgs))
     if uv_pkgs:
         pkg_args = " ".join(shlex.quote(p) for p in uv_pkgs)
-        lines.append(f"RUN uv pip install --system {pkg_args}")
+        # --break-system-packages: Debian and Ubuntu mark their system Python as
+        # externally managed (PEP 668), and uv refuses --system installs there
+        # without it - which left --uv/EXTRA_UV_DEFAULT failing the image build
+        # on the default BASE_OS. The container is disposable and owns that
+        # interpreter, so the protection it asks for doesn't apply here.
+        lines.append(f"RUN uv pip install --system --break-system-packages {pkg_args}")
     containerfile = "\n".join(lines) + "\n"
     podman.build(containerfile, project_tag, context_dir=str(empty_context))
