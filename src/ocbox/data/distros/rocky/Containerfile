@@ -6,7 +6,11 @@
 # not. Verify it builds before relying on it.
 FROM rockylinux:9
 
-RUN dnf install -y ca-certificates curl python3 \
+# ripgrep: OpenCode's glob and grep tools run `rg`. Absent from PATH, OpenCode
+# downloads it from GitHub on first use - which a sandbox, with no network,
+# can't do, so both tools failed with "ripgrep execution failed".
+# Rocky ships it in EPEL, not in the base repositories.
+RUN dnf install -y epel-release && dnf install -y ca-certificates curl python3 ripgrep \
     && dnf clean all
 
 # uv and the OpenCode installer are both piped into `bash` for consistency

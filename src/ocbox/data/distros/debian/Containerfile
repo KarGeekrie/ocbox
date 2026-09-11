@@ -1,7 +1,10 @@
 FROM debian:bookworm-slim
 
+# ripgrep: OpenCode's glob and grep tools run `rg`. Absent from PATH, OpenCode
+# downloads it from GitHub on first use - which a sandbox, with no network,
+# can't do, so both tools failed with "ripgrep execution failed".
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl python3 \
+        ca-certificates curl python3 ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # uv and the OpenCode installer are both piped into `bash`, not `sh`: their

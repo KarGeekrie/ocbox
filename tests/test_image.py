@@ -241,3 +241,11 @@ def test_ocbox_revision_is_this_checkouts_commit() -> None:
 def test_ocbox_revision_outside_a_checkout_is_the_package_version(monkeypatch) -> None:
     monkeypatch.setattr(image.update_check, "revision", lambda repo: None)
     assert image.ocbox_revision() == ocbox.__version__
+
+
+def test_every_distro_image_installs_ripgrep() -> None:
+    """OpenCode's glob and grep tools need `rg` on PATH. Without it OpenCode
+    downloads ripgrep on first use, which a sandbox with no network can't."""
+    for base_os in image.DISTROS:
+        assert "ripgrep" in image._distro_containerfile_path(base_os).read_text(), base_os
+
