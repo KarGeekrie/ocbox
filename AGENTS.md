@@ -254,7 +254,11 @@ opencode 1.18.29 and its published schema:
   inside the checkout (the same directory worked whenever the stall didn't
   strike), an incomplete plugin install, inotify limits (9 of 128 instances)
   and an IPv6 black hole (no IPv6 route here, but connections fail in
-  milliseconds). Cause unknown. No sandboxed run has shown it.
+  milliseconds). Cause unknown. No sandboxed run has shown it. Untested
+  hypothesis: memory pressure - swap activity or an OOM-adjacent stall on the
+  host during the hang would fit the intermittency better than anything ruled
+  out so far. Check `free -h` / swap I/O the next time it strikes before
+  ruling this one out too.
 - **Testing on a stock Ollama truncates OpenCode's prompt**: Ollama logs
   `truncating input prompt limit=2048 prompt=4512`, so with the default
   `num_ctx` the model sees only part of the system prompt, `AGENTS.md`
