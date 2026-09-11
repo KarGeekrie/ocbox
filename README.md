@@ -534,17 +534,40 @@ instance:
 0 2 * * * cd /path/to/project && /usr/local/bin/ocbox --tui --yes -- run "review everything changed since yesterday" >> ~/ocbox-nightly-review.log 2>&1
 ```
 
+Once a new release is out, a scheduled run stops with the update message like
+any other run, until someone updates the checkout.
+
 ocbox has no scheduler of its own - `cron`/`systemd --user timers` already
 do this well, and reimplementing one would be dead weight for what's really
 just "run this command later."
 
-## Checking for updates
+## Updating
 
-`ocbox` checks GitHub for a newer release at most once a day (cached in
-`~/.cache/ocbox/update-check.json`) and prints a one-line notice if one
-exists; it never blocks a run on the network (any failure - offline, rate
-limited, nothing tagged yet - is silently ignored). Set
-`OCBOX_SKIP_UPDATE_CHECK=1` to disable it.
+ocbox runs from a git checkout, so an update is a git update, and ocbox tells
+two kinds apart:
+
+- **A new release - a newer `v*` tag - is required.** ocbox stops before
+  starting anything: a release is the team deciding everyone should be on it.
+- **New commits without a new tag are optional.** ocbox says how many commits
+  your branch is behind, and carries on.
+
+Either way it prints the command to run, and doesn't update itself:
+
+```sh
+git -C <checkout> pull --ff-only && pip install --upgrade -e <checkout>
+```
+
+The pull is what brings the new code. The pip install refreshes what pip
+recorded the first time: the version number, the `ocbox` command, any new
+dependency. `--ff-only` makes git stop rather than merge when you have local
+commits in the way.
+
+The check fetches from the remote at most once a day, and keeps the timestamp in
+the gitignored `.ocbox/update-check.json`. A failed fetch - offline, no SSH
+agent - never blocks a run by itself, but a newer tag that has already been
+fetched does, online or not. `OCBOX_SKIP_UPDATE_CHECK=1` turns the check off
+entirely: an escape hatch for when an update can't be applied right away, not a
+way to stay behind.
 
 ## Development
 
@@ -554,6 +577,21 @@ pytest                                    # unit tests, no podman required
 RUN_PODMAN_INTEGRATION=1 pytest tests/integration   # requires real podman
 ruff check src tests
 ```
+
+## What still writes outside the checkout
+
+ocbox keeps what it writes inside this checkout where it can, in the gitignored
+`.ocbox/`: the OpenCode binary it installs for `--no-sandbox`, the configuration
+directory it assembles for that mode, and the update check's timestamp. The
+rest either can't live there or isn't written by ocbox:
+
+| Where | Written by | What |
+|---|---|---|
+| `~/.local/share/containers/` | Podman, for ocbox | The sandbox images, and one `ocbox-home-<project>` volume per project - the container's home directory, kept between runs. Podman decides where its storage lives. |
+| `$XDG_RUNTIME_DIR/ocbox/<project>/`, usually `/run/user/<uid>/` | ocbox, sandboxed modes | Per-run files: the relay sockets, the generated `opencode.json` and `AGENTS.md`, the web UI password, the `--detach` log. Private to your user. |
+| `~/.local/state/ocbox/<project>/` | ocbox, sandboxed modes | Which extra packages the project image was built with, and its build context. |
+| `~/.config/opencode/`, `~/.local/share/opencode/`, `~/.cache/opencode/` | OpenCode itself, `--no-sandbox` only | OpenCode's standard directories, including its plugin SDK - see "Running without a sandbox". |
+| `~/.config/ocbox/conf.py`, `<project>/ocbox.conf.py` | You | Optional settings. ocbox only reads them. |
 
 ## TODO
 

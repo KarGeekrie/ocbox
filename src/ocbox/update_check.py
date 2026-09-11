@@ -1,57 +1,57 @@
-"""Checks GitHub for a newer ocbox release, at most once a day.
+"""Tells the user when their ocbox checkout is behind, and enforces releases.
 
-Deliberately hardcoded to this project's own repo - there's nothing to
-configure - and deliberately best-effort: any failure (offline, rate-limited,
-no releases yet) is swallowed, since this is a courtesy notice and must never
-slow down or break an actual run.
+ocbox runs from a git checkout (see README "Setup"), so an update is a git
+update, and the two kinds are treated differently on purpose. A newer `v*` tag
+is a release the team decided everyone should run: ocbox refuses to start until
+the checkout has it. New commits without a new tag are only mentioned. Either
+way ocbox only says what to run (`update_command`) - it doesn't update itself.
+
+The version compared is the checkout's own `git describe`, not the installed
+package metadata. An editable install records its version once, at install
+time, so after a pull the metadata keeps reporting the old release and a
+required update would never clear.
+
+Fetching is best-effort and at most once a day, timestamped in the gitignored
+.ocbox/ so nothing lands outside the checkout. A failed fetch (offline, no SSH
+agent) never blocks a run by itself - but a newer tag already fetched does,
+online or not.
+
+This replaces a check against GitHub's releases/latest endpoint, which never
+fired: the project publishes tags, not GitHub Releases, so it always got a 404
+and silently reported nothing.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import subprocess
 import time
-import urllib.error
-import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
-from ocbox import __version__
-
-LATEST_RELEASE_URL = "https://api.github.com/repos/KarGeekrie/ocbox/releases/latest"
 CHECK_INTERVAL = 24 * 60 * 60
-REQUEST_TIMEOUT = 2  # seconds - only spent on a cache miss, at most once a day
+FETCH_TIMEOUT = 10  # seconds - a daily courtesy, never worth a long wait
+STATE_FILE = "update-check.json"
+TAG_PATTERN = "v[0-9]*"
 
 
-def _cache_file(cache_dir: Path) -> Path:
-    return cache_dir / "update-check.json"
+@dataclass(frozen=True)
+class UpdateStatus:
+    # A newer release tag: the run must not go ahead until the checkout has it.
+    required_tag: str | None = None
+    # Untagged commits on the upstream branch: worth a notice, never a block.
+    commits_behind: int = 0
+    upstream: str | None = None
+    current_tag: str | None = None
 
 
-def _read_cache(cache_file: Path) -> dict | None:
-    try:
-        return json.loads(cache_file.read_text())
-    except (OSError, ValueError):
-        return None
-
-
-def _fetch_latest_tag() -> str | None:
-    request = urllib.request.Request(
-        LATEST_RELEASE_URL,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "ocbox"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
-            data = json.loads(response.read())
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-        return None
-    tag = data.get("tag_name")
-    return str(tag) if tag else None
-
-
-def _parse_version(raw: str) -> tuple[int, ...]:
+def parse_version(raw: str) -> tuple[int, ...]:
     """Best-effort dotted-int parse ('v1.2.3' / '1.2.3.dev4+g1234abc' -> (1, 2, 3[, 4])).
 
-    Good enough to order tagged releases against each other; anything that
-    doesn't parse at all just sorts as older rather than raising.
+    Good enough to order release tags against each other; anything that doesn't
+    parse at all sorts as older rather than raising.
     """
     core = raw.lstrip("v").split("+", 1)[0].split("-", 1)[0]
     parts: list[int] = []
@@ -63,24 +63,94 @@ def _parse_version(raw: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def check_for_update(cache_dir: Path, *, current_version: str = __version__) -> str | None:
-    """Returns the latest release tag if it's newer than `current_version`, else None."""
-    if os.environ.get("OCBOX_SKIP_UPDATE_CHECK"):
-        return None
+def _git(repo: Path, *args: str, timeout: float = 5) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    # Never stop to ask for a password or a passphrase mid-run: fail instead.
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+        check=False,
+    )
 
-    cache_file = _cache_file(cache_dir)
-    cached = _read_cache(cache_file)
-    now = time.time()
-    if cached is not None and now - cached.get("checked_at", 0) < CHECK_INTERVAL:
-        latest = cached.get("latest")
-    else:
-        latest = _fetch_latest_tag()
-        try:
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_file.write_text(json.dumps({"checked_at": now, "latest": latest}))
-        except OSError:
-            pass  # the notice still works this run, just won't be cached
 
-    if not latest or _parse_version(latest) <= _parse_version(current_version):
+def _output(repo: Path, *args: str, timeout: float = 5) -> str | None:
+    try:
+        result = _git(repo, *args, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    return latest
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _is_checkout(repo: Path) -> bool:
+    return _output(repo, "rev-parse", "--is-inside-work-tree") == "true"
+
+
+def _record_fetch(state_dir: Path, now: float) -> None:
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / STATE_FILE).write_text(json.dumps({"fetched_at": now}))
+    except OSError:
+        pass  # the check still works this run; it just fetches again next time
+
+
+def _fetch_if_due(repo: Path, state_dir: Path, now: float) -> None:
+    try:
+        last = json.loads((state_dir / STATE_FILE).read_text()).get("fetched_at", 0)
+    except (OSError, ValueError, AttributeError):
+        last = 0
+    if now - last < CHECK_INTERVAL:
+        return
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        _git(repo, "fetch", "--tags", "--quiet", timeout=FETCH_TIMEOUT)
+    # Recorded even when the fetch failed, so an offline machine isn't slowed
+    # down by a doomed attempt on every single run.
+    _record_fetch(state_dir, now)
+
+
+def _newest_tag(repo: Path) -> str | None:
+    listed = _output(repo, "tag", "--list", TAG_PATTERN) or ""
+    tags = [tag for tag in listed.split() if parse_version(tag)]
+    return max(tags, key=parse_version, default=None)
+
+
+def _upstream(repo: Path) -> str | None:
+    return _output(
+        repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"
+    ) or _output(repo, "rev-parse", "--abbrev-ref", "origin/HEAD")
+
+
+def check(repo: Path, state_dir: Path, *, now: float | None = None) -> UpdateStatus:
+    """Where the checkout at `repo` stands against its remote. Never raises."""
+    if os.environ.get("OCBOX_SKIP_UPDATE_CHECK") or not _is_checkout(repo):
+        return UpdateStatus()
+    _fetch_if_due(repo, state_dir, time.time() if now is None else now)
+
+    current = _output(repo, "describe", "--tags", "--abbrev=0", "--match", TAG_PATTERN, "HEAD")
+    newest = _newest_tag(repo)
+    if newest and (current is None or parse_version(newest) > parse_version(current)):
+        return UpdateStatus(required_tag=newest, current_tag=current)
+
+    upstream = _upstream(repo)
+    behind = _output(repo, "rev-list", "--count", f"HEAD..{upstream}") if upstream else None
+    return UpdateStatus(
+        commits_behind=int(behind) if behind and behind.isdigit() else 0,
+        upstream=upstream,
+        current_tag=current,
+    )
+
+
+def update_command(repo: Path) -> str:
+    """The command that brings the checkout at `repo` up to date, to show the user.
+
+    The pull is what updates: ocbox is an editable install of this checkout
+    (README "Setup"), so a pip install on its own has nothing new to install.
+    The pip install that follows refreshes the package metadata - version,
+    entry points, dependencies - which an editable install otherwise keeps from
+    the day it was first installed.
+    """
+    return f"git -C {repo} pull --ff-only && pip install --upgrade -e {repo}"

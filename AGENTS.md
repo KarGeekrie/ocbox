@@ -104,6 +104,17 @@ exactly how the integration tests were validated during initial development
   `.ocbox/` (`image.repo_local_dir()`): the config directory it assembles, and
   an OpenCode binary it installs when none exists on `PATH` or in
   `~/.opencode/bin`.
+- `update_check.py` is git-based: the current version is the checkout's own
+  `git describe --tags`, never `ocbox.__version__`, whose editable-install
+  metadata stays at whatever was installed first and would keep a required
+  update from ever clearing. A newer `v*` tag makes `cli.main()` refuse to run;
+  untagged upstream commits only print a notice. Both show
+  `update_check.update_command()` - ocbox never updates itself. The daily fetch
+  timestamp lives in `.ocbox/`. It replaced a GitHub `releases/latest` check that
+  never fired, because the project pushes tags and has no GitHub Releases.
+  `tests/test_update_check.py` drives real git repositories (bare remote plus
+  clones), not mocks; `tests/test_cli.py` sets `OCBOX_SKIP_UPDATE_CHECK` so the
+  other CLI tests don't fetch this checkout's remote.
 - `image.py` builds and caches sandbox images, with a content-hash `LABEL`
   on the base image so an ocbox upgrade (changed `Containerfile`/`relay.py`/
   `entrypoint.sh`) triggers a rebuild instead of silently reusing a stale
