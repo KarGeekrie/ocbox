@@ -43,11 +43,10 @@ def test_repo_config_dir_points_at_the_repo_root_directory() -> None:
     assert (path.parent / "pyproject.toml").is_file()
 
 
-def test_repo_config_dir_holds_agents_skills_instructions_and_the_default_jsonc() -> None:
+def test_repo_config_dir_holds_agents_skills_and_the_default_jsonc() -> None:
     path = image.repo_config_dir()
     assert (path / "agents").is_dir()
     assert (path / "skills").is_dir()
-    assert (path / "instructions").is_dir()
     assert (path / "opencode.jsonc").is_file()
 
 
@@ -149,7 +148,7 @@ def test_build_project_image_generates_containerfile_with_packages(tmp_path) -> 
     assert "FROM ocbox/base:latest" in containerfile_text
     assert "apt-get install" in containerfile_text
     assert "git" in containerfile_text and "curl" in containerfile_text
-    assert "uv pip install --system ruff" in containerfile_text
+    assert "uv pip install --system --break-system-packages ruff" in containerfile_text
 
 
 def test_build_project_image_no_extra_layers_when_no_packages(tmp_path) -> None:
@@ -195,3 +194,17 @@ def test_build_project_image_uses_dnf_for_rocky(tmp_path) -> None:
     containerfile_text = podman.build.call_args[0][0]
     assert "dnf install -y git" in containerfile_text
     assert "apt-get" not in containerfile_text
+
+
+def test_repo_config_dir_ships_the_team_agents_md() -> None:
+    assert (image.repo_config_dir() / "AGENTS.md").is_file()
+
+
+def test_repo_local_dir_sits_next_to_opencode_config() -> None:
+    assert image.repo_local_dir() == image.repo_config_dir().parent / ".ocbox"
+
+
+def test_repo_local_dir_is_gitignored() -> None:
+    """It holds an OpenCode binary and OpenCode's node_modules - never to be committed."""
+    gitignore = (image.repo_config_dir().parent / ".gitignore").read_text().splitlines()
+    assert "/.ocbox/" in gitignore

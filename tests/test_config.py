@@ -5,33 +5,21 @@ import pytest
 from ocbox.config import ConfigError, load_config
 
 
-def test_missing_config_raises(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="No config found"):
-        load_config(explicit_path=tmp_path / "does-not-exist.py")
-
-
-def test_missing_llm_fields_raises(tmp_path: Path) -> None:
-    conf = tmp_path / "conf.py"
-    conf.write_text("BASE_IMAGE = 'x'\n")
-    with pytest.raises(ConfigError, match="LLM_HOST and LLM_PORT"):
-        load_config(explicit_path=conf)
-
-
-def test_loads_required_fields(tmp_path: Path) -> None:
-    conf = tmp_path / "conf.py"
-    conf.write_text("LLM_HOST = '10.0.0.5'\nLLM_PORT = 11434\n")
-    cfg = load_config(explicit_path=conf)
-    assert cfg.llm_host == "10.0.0.5"
-    assert cfg.llm_port == 11434
+def test_no_config_file_at_all_gives_defaults(tmp_path: Path) -> None:
+    """conf.py is optional: every setting has a default."""
+    cfg = load_config(global_path=tmp_path / "absent.py")
     assert cfg.base_image == "ocbox/base:latest"
     assert cfg.base_os == "ubuntu"
+
+
+def test_explicitly_named_missing_config_raises(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="No config found"):
+        load_config(explicit_path=tmp_path / "does-not-exist.py")
 
 
 def test_loads_optional_overrides(tmp_path: Path) -> None:
     conf = tmp_path / "conf.py"
     conf.write_text(
-        "LLM_HOST = '127.0.0.1'\n"
-        "LLM_PORT = 8080\n"
         "BASE_IMAGE = 'custom:latest'\n"
         "CONTAINER_WEB_PORT = 9000\n"
         "EXTRA_APT_DEFAULT = ['git']\n"
@@ -50,15 +38,39 @@ def test_loads_optional_overrides(tmp_path: Path) -> None:
 
 def test_project_local_override_wins(tmp_path: Path) -> None:
     global_conf = tmp_path / "global.py"
-    global_conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1111\n")
-
+    global_conf.write_text("CONTAINER_WEB_PORT = 1111\n")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    (project_dir / "ocbox.conf.py").write_text("LLM_PORT = 2222\n")
+    (project_dir / "ocbox.conf.py").write_text("CONTAINER_WEB_PORT = 2222\n")
 
     cfg = load_config(explicit_path=global_conf, project_dir=project_dir)
-    assert cfg.llm_host == "127.0.0.1"
-    assert cfg.llm_port == 2222
+    assert cfg.container_web_port == 2222
+
+
+def test_project_override_applies_without_a_global_config(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "ocbox.conf.py").write_text("BASE_OS = 'rocky'\n")
+
+    cfg = load_config(global_path=tmp_path / "absent.py", project_dir=project_dir)
+    assert cfg.base_os == "rocky"
+
+
+@pytest.mark.parametrize("line", ["LLM_HOST = '10.0.0.5'", "LLM_PORT = 11434"])
+def test_llm_address_in_conf_py_is_rejected_with_where_it_moved(tmp_path: Path, line) -> None:
+    """Silently ignoring these would leave someone editing a value that does nothing."""
+    conf = tmp_path / "conf.py"
+    conf.write_text(line + "\n")
+    with pytest.raises(ConfigError, match=r"provider\.local\.options\.baseURL"):
+        load_config(explicit_path=conf)
+
+
+def test_llm_address_in_a_project_conf_is_rejected_too(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "ocbox.conf.py").write_text("LLM_HOST = 'x'\n")
+    with pytest.raises(ConfigError, match=r"opencode\.jsonc"):
+        load_config(global_path=tmp_path / "absent.py", project_dir=project_dir)
 
 
 def test_invalid_python_raises(tmp_path: Path) -> None:
@@ -70,32 +82,18 @@ def test_invalid_python_raises(tmp_path: Path) -> None:
 
 def test_base_os_ubuntu_accepted(tmp_path: Path) -> None:
     conf = tmp_path / "conf.py"
-    conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\nBASE_OS = 'ubuntu'\n")
-    cfg = load_config(explicit_path=conf)
-    assert cfg.base_os == "ubuntu"
+    conf.write_text("BASE_OS = 'ubuntu'\n")
+    assert load_config(explicit_path=conf).base_os == "ubuntu"
 
 
 def test_base_os_rocky_accepted(tmp_path: Path) -> None:
     conf = tmp_path / "conf.py"
-    conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\nBASE_OS = 'rocky'\n")
-    cfg = load_config(explicit_path=conf)
-    assert cfg.base_os == "rocky"
+    conf.write_text("BASE_OS = 'rocky'\n")
+    assert load_config(explicit_path=conf).base_os == "rocky"
 
 
 def test_base_os_unknown_value_rejected(tmp_path: Path) -> None:
     conf = tmp_path / "conf.py"
-    conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\nBASE_OS = 'arch'\n")
+    conf.write_text("BASE_OS = 'arch'\n")
     with pytest.raises(ConfigError, match="not supported"):
         load_config(explicit_path=conf)
-
-
-def test_base_os_project_override(tmp_path: Path) -> None:
-    global_conf = tmp_path / "global.py"
-    global_conf.write_text("LLM_HOST = '127.0.0.1'\nLLM_PORT = 1\n")
-
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    (project_dir / "ocbox.conf.py").write_text("BASE_OS = 'rocky'\n")
-
-    cfg = load_config(explicit_path=global_conf, project_dir=project_dir)
-    assert cfg.base_os == "rocky"

@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ocbox import project, update_check
+from ocbox import image, update_check
 from ocbox.config import ConfigError, load_config
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError, run_preflight
@@ -58,16 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="OpenCode settings (models, theme, ...) to mount into the sandbox. "
-        "Defaults to ~/.config/ocbox/opencode.jsonc when it exists.",
+        "Defaults to opencode-config/opencode.jsonc.",
     )
     parser.add_argument(
         "--skills-dir", type=Path, default=None, help="Override the default skills/ directory."
-    )
-    parser.add_argument(
-        "--instructions-dir",
-        type=Path,
-        default=None,
-        help="Override the default instructions/ directory.",
     )
     parser.add_argument(
         "--detach",
@@ -168,11 +162,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    latest = update_check.check_for_update(project.cache_dir())
-    if latest:
+    repo = image.repo_config_dir().parent
+    status = update_check.check(repo, image.repo_local_dir())
+    if status.required_tag:
         print(
-            f"ocbox: a newer version is available ({latest}) - "
-            "see https://github.com/KarGeekrie/ocbox/releases",
+            f"ocbox: release {status.required_tag} is out and required "
+            f"(this checkout is on {status.current_tag or 'no release'}) - update with:\n"
+            f"  {update_check.update_command(repo)}",
+            file=sys.stderr,
+        )
+        return 1
+    if status.commits_behind:
+        print(
+            f"ocbox: {status.commits_behind} new commit(s) on {status.upstream}, not part of "
+            f"a release yet - optional, to update: {update_check.update_command(repo)}",
             file=sys.stderr,
         )
 
@@ -182,7 +185,6 @@ def main(argv: list[str] | None = None) -> int:
                 agents_dir=args.agents_dir,
                 user_config=args.opencode_config,
                 skills_dir=args.skills_dir,
-                instructions_dir=args.instructions_dir,
                 opencode_args=opencode_args,
             )
         except NoSandboxError as exc:
@@ -213,13 +215,12 @@ def main(argv: list[str] | None = None) -> int:
             agents_dir=args.agents_dir,
             user_config=args.opencode_config,
             skills_dir=args.skills_dir,
-            instructions_dir=args.instructions_dir,
             host_web_port=args.web_port,
             opencode_args=opencode_args,
             detach=args.detach,
             extra_mounts=extra_mounts,
         )
-    except PodmanError as exc:
+    except (PodmanError, ConfigError) as exc:
         print(f"ocbox: {exc}", file=sys.stderr)
         return 1
 

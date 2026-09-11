@@ -1,31 +1,31 @@
 {
-  // ocbox mounts this file into every sandbox as OpenCode's *global* config,
-  // and (in --no-sandbox mode) symlinks it straight into OpenCode's real
-  // global config directory.
+  // TEAM CONFIGURATION - pre-configured; editing it is possible but not
+  // recommended.
   //
-  // provider.local.options.baseURL behaves differently depending on mode:
-  //   - web/--tui (sandboxed): ocbox always overrides it to point at the
-  //     relay reaching your LLM - whatever you put here is ignored there.
-  //   - --no-sandbox: nothing overrides it. OpenCode uses this value as-is,
-  //     so it must be your LLM server's real, directly-reachable address.
-  // Fill in <IP>:<PORT> below for --no-sandbox to work; it's unused (and
-  // safely ignored) in the sandboxed modes.
+  // This repository is a preconfigured setup for our team, not a general-
+  // purpose package: this file already declares the team's provider, models,
+  // permissions and defaults. It is the only OpenCode file in your scope, and
+  // ocbox hands it to OpenCode in every mode. A change made for one person
+  // makes their OpenCode behave differently from everyone else's; a change
+  // everyone needs belongs in a commit here.
   //
-  // Copy this to ~/.config/ocbox/opencode.jsonc and edit that instead if you
-  // don't want it tracked in the repo; ocbox uses that copy when it exists,
-  // this file otherwise. Point --opencode-config at another file to override
-  // per invocation.
+  // How ocbox uses it: mounted into every sandbox as OpenCode's *global*
+  // config, and in --no-sandbox mode placed in the config directory ocbox
+  // hands OpenCode through OPENCODE_CONFIG_DIR.
   //
-  // NOTE: several keys below (lsp, compaction, attachment, disabled_providers,
-  // instructions) are unverified against OpenCode's published schema in this
-  // repo - check `opencode debug config` after your first real run to
-  // confirm they survived (OpenCode drops keys it doesn't recognise
-  // silently, without an error - see AGENTS.md's "Verification history").
-  // "instructions" in particular is a guess at the mechanism, not just the
-  // content - see opencode-config/instructions/README.md.
+  // provider.local.options.baseURL is where the LLM server is, and it is read
+  // in every mode: inside a sandbox it tells ocbox's relay what to dial (OpenCode
+  // is pointed at the relay instead); with --no-sandbox OpenCode connects to it
+  // directly. It must be plain http for the sandbox relay.
+  //
+  // Verified against opencode 1.18.29: every key below survives
+  // `opencode debug config`. OpenCode drops keys it doesn't recognise
+  // silently, so check any key added the same way.
+  //
+  // Standing instructions do NOT belong here - OpenCode's `instructions` key
+  // is parsed but never resolved. Team rules go in opencode-config/AGENTS.md.
 
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["instructions/*.md"],
   "lsp": true,
   // Disable session sharing
   "share": "disabled",
@@ -51,7 +51,9 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "ai-lpec (local)",
       "options": {
-        "baseURL": "http://<IP>:<PORT>/v1"
+        // Example: a local Ollama. Replace with the team's LLM server - see the
+        // README's TODO.
+        "baseURL": "http://127.0.0.1:11434/v1"
       },
       "models": {
         "Qwen3.8-27B-smart": {

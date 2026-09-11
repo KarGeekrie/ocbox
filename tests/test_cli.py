@@ -8,6 +8,14 @@ from ocbox.config import ConfigError
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError
 from ocbox.sandbox import NoSandboxError
+from ocbox.update_check import UpdateStatus
+
+
+@pytest.fixture(autouse=True)
+def no_update_check(monkeypatch):
+    """Keeps main() from fetching this checkout's remote during tests; the
+    tests about the check patch update_check.check itself."""
+    monkeypatch.setenv("OCBOX_SKIP_UPDATE_CHECK", "1")
 
 
 def test_parser_defaults() -> None:
@@ -120,20 +128,41 @@ def test_main_passes_detach_through(mock_run, mock_config, mock_preflight) -> No
     assert mock_run.call_args.kwargs["detach"] is True
 
 
-@patch("ocbox.cli.update_check.check_for_update", return_value="v9.9.9")
+@patch(
+    "ocbox.cli.update_check.check",
+    return_value=UpdateStatus(required_tag="v9.9.9", current_tag="v1.0.0"),
+)
+@patch("ocbox.cli.run_preflight")
+def test_main_refuses_to_run_until_a_required_release_is_installed(
+    mock_preflight, mock_check, capsys
+) -> None:
+    assert main([]) == 1
+    err = capsys.readouterr().err
+    assert "v9.9.9" in err
+    assert "pip install --upgrade -e" in err
+    mock_preflight.assert_not_called()
+
+
+@patch(
+    "ocbox.cli.update_check.check",
+    return_value=UpdateStatus(commits_behind=3, upstream="origin/main", current_tag="v1.0.0"),
+)
 @patch("ocbox.cli.run_preflight", side_effect=PreflightError("podman missing"))
-def test_main_prints_a_notice_when_a_newer_release_exists(
+def test_main_mentions_untagged_commits_and_carries_on(mock_preflight, mock_check, capsys) -> None:
+    main([])
+    assert "3 new commit(s) on origin/main" in capsys.readouterr().err
+    mock_preflight.assert_called_once()
+
+
+@patch("ocbox.cli.update_check.check", return_value=UpdateStatus())
+@patch("ocbox.cli.run_preflight", side_effect=PreflightError("podman missing"))
+def test_main_says_nothing_about_updates_when_up_to_date(
     mock_preflight, mock_check, capsys
 ) -> None:
     main([])
-    assert "v9.9.9" in capsys.readouterr().err
-
-
-@patch("ocbox.cli.update_check.check_for_update", return_value=None)
-@patch("ocbox.cli.run_preflight", side_effect=PreflightError("podman missing"))
-def test_main_prints_nothing_when_up_to_date(mock_preflight, mock_check, capsys) -> None:
-    main([])
-    assert "newer version" not in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "commit" not in err
+    assert "release" not in err
 
 
 @patch("ocbox.cli.run_no_sandbox", return_value=0)
@@ -159,20 +188,6 @@ def test_main_no_sandbox_never_loads_conf_py(mock_run_no_sandbox, mock_load_conf
 def test_main_no_sandbox_forwards_opencode_args(mock_run_no_sandbox) -> None:
     main(["--no-sandbox", "--", "run", "hello"])
     assert mock_run_no_sandbox.call_args.kwargs["opencode_args"] == ["run", "hello"]
-
-
-@patch("ocbox.cli.run_no_sandbox", return_value=0)
-def test_main_no_sandbox_forwards_instructions_dir(mock_run_no_sandbox) -> None:
-    main(["--no-sandbox", "--instructions-dir", "/tmp/my-instructions"])
-    assert str(mock_run_no_sandbox.call_args.kwargs["instructions_dir"]) == "/tmp/my-instructions"
-
-
-@patch("ocbox.cli.run_preflight")
-@patch("ocbox.cli.load_config")
-@patch("ocbox.cli.run", return_value=0)
-def test_main_forwards_instructions_dir(mock_run, mock_config, mock_preflight) -> None:
-    main(["--instructions-dir", "/tmp/my-instructions"])
-    assert str(mock_run.call_args.kwargs["instructions_dir"]) == "/tmp/my-instructions"
 
 
 @pytest.mark.parametrize(

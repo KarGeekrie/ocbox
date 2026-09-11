@@ -48,20 +48,6 @@ def _xdg_state_home() -> Path:
     return Path.home() / ".local" / "state"
 
 
-def _xdg_cache_home() -> Path:
-    raw = os.environ.get("XDG_CACHE_HOME")
-    if raw:
-        return Path(raw)
-    return Path.home() / ".cache"
-
-
-def cache_dir() -> Path:
-    """Global (not per-project) cache dir - currently just the update-check stamp."""
-    path = _xdg_cache_home() / "ocbox"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def runtime_dir(slug: str) -> Path:
     path = _xdg_runtime_dir() / "ocbox" / slug
     _mkdir_private(path)

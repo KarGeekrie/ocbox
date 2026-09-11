@@ -3,10 +3,10 @@ from pathlib import Path
 import pytest
 
 from ocbox import sandbox
+from ocbox.config import ConfigError
 from ocbox.sandbox import (
     AGENTS_DIR_MOUNT,
     EXTRA_MOUNTS_ROOT,
-    INSTRUCTIONS_DIR_MOUNT,
     SKILLS_DIR_MOUNT,
     USER_CONFIG_MOUNT,
     RunPlan,
@@ -25,7 +25,6 @@ def _plan(**overrides) -> RunPlan:
         "agents_dir": Path("/pkg/data/agents"),
         "user_config": Path("/pkg/data/opencode.jsonc"),
         "skills_dir": Path("/pkg/data/skills"),
-        "instructions_dir": Path("/pkg/data/instructions"),
         "data_volume": "ocbox-home-myproj",
         "container_name": "ocbox-myproj",
         "container_web_port": 4096,
@@ -95,8 +94,8 @@ def test_argv_includes_resource_limits_when_set() -> None:
 
 
 def test_generate_opencode_config_uses_the_given_base_url() -> None:
-    """base_url is the relay endpoint in sandbox mode, or LLM_HOST:LLM_PORT
-    directly in --no-sandbox mode - either way it's just passed through."""
+    """base_url is the relay endpoint in sandbox mode, or opencode.jsonc's own
+    baseURL in --no-sandbox mode - either way it's just passed through."""
     cfg = _generate_opencode_config("http://127.0.0.1:8081/v1")
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 
@@ -133,23 +132,6 @@ def test_argv_mounts_skills_dir_after_the_home_volume_it_nests_in() -> None:
     assert home_volume < skills
 
 
-def test_argv_mounts_instructions_dir_at_opencode_discovery_path() -> None:
-    """Same mechanism as agents/skills: mounted at a fixed location, though
-    unlike them, OpenCode is believed to also need instructions.jsonc's own
-    `instructions` array to point at it - see opencode-config/instructions/
-    README.md."""
-    argv = build_podman_run_argv(_plan(instructions_dir=Path("/pkg/data/instructions")))
-    assert f"/pkg/data/instructions:{INSTRUCTIONS_DIR_MOUNT}:ro" in argv
-    assert INSTRUCTIONS_DIR_MOUNT == "/home/ocbox/.config/opencode/instructions"
-
-
-def test_argv_mounts_instructions_dir_after_the_home_volume_it_nests_in() -> None:
-    argv = build_podman_run_argv(_plan())
-    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
-    instructions = next(
-        i for i, a in enumerate(argv) if a.endswith(f":{INSTRUCTIONS_DIR_MOUNT}:ro")
-    )
-    assert home_volume < instructions
 
 
 def test_argv_omits_extra_mounts_when_none_given() -> None:
@@ -182,8 +164,8 @@ def test_argv_mounts_user_config_as_opencode_global_config() -> None:
     """Mounted at OpenCode's *global* config path on purpose: global ranks
     below OPENCODE_CONFIG, so ocbox keeps control of the provider endpoint
     while the user's model list is merged in."""
-    argv = build_podman_run_argv(_plan(user_config=Path("/home/u/.config/ocbox/opencode.jsonc")))
-    assert f"/home/u/.config/ocbox/opencode.jsonc:{USER_CONFIG_MOUNT}:ro" in argv
+    argv = build_podman_run_argv(_plan(user_config=Path("/repo/opencode-config/opencode.jsonc")))
+    assert f"/repo/opencode-config/opencode.jsonc:{USER_CONFIG_MOUNT}:ro" in argv
     assert USER_CONFIG_MOUNT == "/home/ocbox/.config/opencode/opencode.jsonc"
 
 
@@ -254,21 +236,8 @@ def test_argv_tui_mode_still_mounts_workspace_and_config() -> None:
     assert "/home/user/myproj" in sources
     assert "/pkg/data/agents" in sources
     assert "/pkg/data/skills" in sources
-    assert "/pkg/data/instructions" in sources
 
 
-def test_resolve_user_config_prefers_the_users_file(tmp_path, monkeypatch) -> None:
-    user_file = tmp_path / "opencode.jsonc"
-    user_file.write_text("{}")
-    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", user_file)
-    assert sandbox._resolve_user_config() == user_file
-
-
-def test_resolve_user_config_falls_back_to_packaged_default(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sandbox, "USER_CONFIG_PATH", tmp_path / "absent.jsonc")
-    resolved = sandbox._resolve_user_config()
-    assert resolved.name == "opencode.jsonc"
-    assert resolved.exists(), "the packaged default must ship, it is always mounted"
 
 
 def test_argv_appends_opencode_args_after_the_image_tag() -> None:
@@ -328,3 +297,136 @@ def test_daemonize_child_detaches_and_redirects_stdio(monkeypatch, tmp_path) -> 
     assert ("dup2", 99, 1) in calls  # stdout -> the log file
     assert ("dup2", 99, 2) in calls  # stderr -> the log file
     assert calls.count(("close", 99)) == 2  # devnull fd and log fd, each closed after dup2'ing
+
+
+def test_argv_mounts_global_agents_md_when_present() -> None:
+    argv = build_podman_run_argv(_plan(global_agents_md=Path("/repo/AGENTS.md")))
+    assert f"/repo/AGENTS.md:{sandbox.GLOBAL_AGENTS_MD_MOUNT}:ro" in argv
+    assert sandbox.GLOBAL_AGENTS_MD_MOUNT == "/home/ocbox/.config/opencode/AGENTS.md"
+
+
+def test_argv_mounts_global_agents_md_after_the_home_volume_it_nests_in() -> None:
+    argv = build_podman_run_argv(_plan(global_agents_md=Path("/repo/AGENTS.md")))
+    home_volume = next(i for i, a in enumerate(argv) if a.endswith(":/home/ocbox:rw"))
+    mount = f":{sandbox.GLOBAL_AGENTS_MD_MOUNT}:ro"
+    agents_md = next(i for i, a in enumerate(argv) if a.endswith(mount))
+    assert home_volume < agents_md
+
+
+def test_argv_skips_global_agents_md_when_absent() -> None:
+    """Optional team content: no file must mean no bind mount of a path that
+    isn't there."""
+    argv = build_podman_run_argv(_plan())
+    assert not any(a.endswith(f":{sandbox.GLOBAL_AGENTS_MD_MOUNT}:ro") for a in argv)
+
+
+# ---- the LLM's address, read from opencode.jsonc ---------------------------
+
+
+def _jsonc_with_base_url(tmp_path: Path, base_url: str) -> Path:
+    path = tmp_path / "opencode.jsonc"
+    path.write_text(
+        "{\n  // the address lives here\n"
+        f'  "provider": {{"local": {{"options": {{"baseURL": "{base_url}"}}}}}},\n}}\n'
+    )
+    return path
+
+
+def test_llm_endpoint_reads_host_port_and_path(tmp_path) -> None:
+    endpoint = sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "http://10.1.2.3:4567/v1/"))
+    assert (endpoint.host, endpoint.port, endpoint.path) == ("10.1.2.3", 4567, "/v1")
+
+
+def test_llm_endpoint_defaults_to_port_80(tmp_path) -> None:
+    assert sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "http://llm.lan/v1")).port == 80
+
+
+def test_llm_endpoint_rejects_https(tmp_path) -> None:
+    """The relay is plain TCP seen at http://127.0.0.1 - no certificate matches it."""
+    with pytest.raises(sandbox.LlmEndpointError, match="https"):
+        sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "https://llm.lan/v1"))
+
+
+def test_llm_endpoint_rejects_a_placeholder(tmp_path) -> None:
+    with pytest.raises(sandbox.LlmEndpointError, match="placeholder"):
+        sandbox.llm_endpoint(_jsonc_with_base_url(tmp_path, "http://<IP>:<PORT>/v1"))
+
+
+def test_llm_endpoint_rejects_a_missing_base_url(tmp_path) -> None:
+    path = tmp_path / "opencode.jsonc"
+    path.write_text('{"provider": {"local": {"models": {}}}}')
+    with pytest.raises(sandbox.LlmEndpointError, match="baseURL"):
+        sandbox.llm_endpoint(path)
+
+
+def test_llm_endpoint_error_is_a_config_error() -> None:
+    """So cli.py reports it as a one-line error rather than a traceback."""
+    assert issubclass(sandbox.LlmEndpointError, ConfigError)
+
+
+def test_the_team_opencode_jsonc_names_a_usable_llm() -> None:
+    endpoint = sandbox.llm_endpoint(sandbox.image.repo_config_dir() / "opencode.jsonc")
+    assert endpoint.host and endpoint.port > 0
+
+
+def test_argv_network_comes_from_the_same_constant_the_agents_md_describes() -> None:
+    argv = build_podman_run_argv(_plan())
+    assert argv[argv.index("--network") + 1] == sandbox.SANDBOX_NETWORK == "none"
+
+
+# ---- the AGENTS.md composed per mode ---------------------------------------
+
+
+def test_sandbox_facts_without_network_say_so() -> None:
+    facts = "\n".join(sandbox._sandbox_facts("ubuntu", [], [], []))
+    assert "Network: none" in facts
+    assert "Extra system packages: none." in facts
+    assert "Extra Python packages (uv): none." in facts
+
+
+def test_sandbox_facts_describe_a_network_when_there_is_one() -> None:
+    facts = "\n".join(sandbox._sandbox_facts("ubuntu", [], [], [], network="slirp4netns"))
+    assert "Network: available" in facts
+    assert "Network: none" not in facts
+
+
+def test_sandbox_facts_list_packages_distro_and_mounts() -> None:
+    facts = "\n".join(
+        sandbox._sandbox_facts("rocky", ["git", "jq"], ["py-spy"], [Path("/home/u/shared-lib")])
+    )
+    assert "rocky" in facts
+    assert "git, jq" in facts
+    assert "py-spy" in facts
+    assert "`/mnt/shared-lib`" in facts
+
+
+def test_compose_global_agents_md_orders_environment_facts_then_team_rules(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "environments").mkdir()
+    (tmp_path / "environments" / "sandbox.md").write_text("# Environment: sandbox\n")
+    (tmp_path / "AGENTS.md").write_text("# Team rules\n")
+    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
+
+    text = sandbox._compose_global_agents_md("sandbox", ["## This sandbox", "- fact"])
+
+    assert text.index("# Environment: sandbox") < text.index("- fact") < text.index("# Team rules")
+
+
+def test_compose_global_agents_md_uses_only_the_requested_environment(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "environments").mkdir()
+    (tmp_path / "environments" / "sandbox.md").write_text("SANDBOX-ONLY\n")
+    (tmp_path / "environments" / "no-sandbox.md").write_text("HOST-ONLY\n")
+    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
+
+    text = sandbox._compose_global_agents_md("no-sandbox", [])
+
+    assert "HOST-ONLY" in text
+    assert "SANDBOX-ONLY" not in text
+
+
+def test_compose_global_agents_md_is_none_when_there_is_nothing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
+    assert sandbox._compose_global_agents_md("sandbox", []) is None

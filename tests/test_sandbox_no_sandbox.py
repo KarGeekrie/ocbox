@@ -5,6 +5,7 @@ everything here is redirected into tmp_path via monkeypatched HOME/XDG vars.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,84 +35,65 @@ def test_find_or_install_uses_the_well_known_fallback_path(tmp_path, monkeypatch
     mock_run.assert_not_called()
 
 
-def test_find_or_install_runs_the_official_installer_when_missing(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path)
-    which_results = iter([None, "/usr/local/bin/opencode"])  # before, then after install
-    monkeypatch.setattr(sandbox.shutil, "which", lambda name: next(which_results))
 
-    curl_result = MagicMock(stdout=b"#!/bin/bash\necho installing\n")
-    with patch.object(sandbox.subprocess, "run", return_value=curl_result) as mock_run:
+
+def test_find_or_install_uses_an_existing_package_local_binary(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path / "home")
+    local = tmp_path / "repo" / ".ocbox"
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: local)
+    (local / "bin").mkdir(parents=True)
+    (local / "bin" / "opencode").write_text("#!/bin/sh\n")
+
+    with patch.object(sandbox.subprocess, "run") as mock_run:
+        assert sandbox._find_or_install_opencode() == str(local / "bin" / "opencode")
+    mock_run.assert_not_called()
+
+
+def _fake_installer(stdout=b"#!/bin/bash\n", produce_binary=True):
+    """Stands in for curl + the official script, which writes $HOME/.opencode/bin."""
+
+    def run(argv, **kwargs):
+        if argv[0] == "curl":
+            return MagicMock(stdout=stdout)
+        if produce_binary:
+            target = Path(kwargs["env"]["HOME"]) / ".opencode" / "bin" / "opencode"
+            target.parent.mkdir(parents=True)
+            target.write_text("binary")
+        return MagicMock()
+
+    return run
+
+
+def test_find_or_install_installs_into_the_package_not_the_home(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox.Path, "home", lambda: home)
+    monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    local = tmp_path / "repo" / ".ocbox"
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: local)
+
+    with patch.object(sandbox.subprocess, "run", side_effect=_fake_installer()) as mock_run:
         found = sandbox._find_or_install_opencode()
 
-    assert found == "/usr/local/bin/opencode"
-    curl_call, bash_call = mock_run.call_args_list
-    assert curl_call.args[0][:2] == ["curl", "-fsSL"]
-    assert bash_call.args[0] == ["bash"]
-    assert bash_call.kwargs["input"] == curl_result.stdout
+    assert found == str(local / "bin" / "opencode")
+    assert (local / "bin" / "opencode").read_text() == "binary"
+    bash_call = mock_run.call_args_list[1]
+    assert bash_call.args[0] == ["bash", "-s", "--", "--no-modify-path"]
+    assert Path(bash_call.kwargs["env"]["HOME"]).is_relative_to(local)
+    assert not (home / ".opencode").exists()
+    assert sorted(p.name for p in local.iterdir()) == ["bin"], "throwaway install HOME left behind"
 
 
-def test_find_or_install_raises_if_still_missing_after_install(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path)
+def test_find_or_install_raises_if_the_installer_produces_nothing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: tmp_path / "repo" / ".ocbox")
     with (
-        patch.object(sandbox.subprocess, "run", return_value=MagicMock(stdout=b"")),
-        pytest.raises(sandbox.NoSandboxError, match="add its install location to PATH"),
+        patch.object(sandbox.subprocess, "run", side_effect=_fake_installer(produce_binary=False)),
+        pytest.raises(sandbox.NoSandboxError, match="didn't produce"),
     ):
         sandbox._find_or_install_opencode()
-
-
-# ---- _link_into_opencode_config ----------------------------------------
-
-
-def test_link_creates_a_symlink_when_target_is_absent(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    source = tmp_path / "opencode-config" / "agents"
-    source.mkdir(parents=True)
-
-    sandbox._link_into_opencode_config("agents", source)
-
-    target = tmp_path / "config" / "opencode" / "agents"
-    assert target.is_symlink()
-    assert target.resolve() == source.resolve()
-
-
-def test_link_is_idempotent_when_already_correct(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    source = tmp_path / "opencode-config" / "agents"
-    source.mkdir(parents=True)
-    sandbox._link_into_opencode_config("agents", source)
-
-    sandbox._link_into_opencode_config("agents", source)  # must not raise
-
-    target = tmp_path / "config" / "opencode" / "agents"
-    assert target.resolve() == source.resolve()
-
-
-def test_link_replaces_a_stale_symlink(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    old_source = tmp_path / "old-agents"
-    old_source.mkdir()
-    new_source = tmp_path / "opencode-config" / "agents"
-    new_source.mkdir(parents=True)
-
-    sandbox._link_into_opencode_config("agents", old_source)
-    sandbox._link_into_opencode_config("agents", new_source)
-
-    target = tmp_path / "config" / "opencode" / "agents"
-    assert target.resolve() == new_source.resolve()
-
-
-def test_link_refuses_to_replace_a_real_pre_existing_directory(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    target = tmp_path / "config" / "opencode" / "agents"
-    target.mkdir(parents=True)
-    (target / "my-own-agent.md").write_text("not ocbox's")
-    source = tmp_path / "opencode-config" / "agents"
-    source.mkdir(parents=True)
-
-    with pytest.raises(sandbox.NoSandboxError, match="isn't managed by ocbox"):
-        sandbox._link_into_opencode_config("agents", source)
-    assert (target / "my-own-agent.md").exists()
 
 
 # ---- run_no_sandbox ----------------------------------------
@@ -120,12 +102,18 @@ def test_link_refuses_to_replace_a_real_pre_existing_directory(tmp_path, monkeyp
 @pytest.fixture
 def mocked_no_sandbox_env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    # The assembled config dir lives under XDG_STATE_HOME; without this the
+    # tests would write symlinks into the developer's real ~/.local/state.
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
     repo_config = tmp_path / "opencode-config"
     (repo_config / "agents").mkdir(parents=True)
     (repo_config / "skills").mkdir(parents=True)
-    (repo_config / "instructions").mkdir(parents=True)
     (repo_config / "opencode.jsonc").write_text('{"provider": {"local": {}}}')
+    (repo_config / "AGENTS.md").write_text("# Team rules\n")
+    (repo_config / "environments").mkdir()
+    (repo_config / "environments" / "no-sandbox.md").write_text("# Environment: your machine\n")
+    (repo_config / "environments" / "sandbox.md").write_text("# Environment: sandbox\n")
 
     with (
         patch("ocbox.sandbox.image") as mock_image,
@@ -133,6 +121,7 @@ def mocked_no_sandbox_env(tmp_path, monkeypatch):
         patch("ocbox.sandbox.os.execvpe") as mock_execvpe,
     ):
         mock_image.repo_config_dir.return_value = repo_config
+        mock_image.repo_local_dir.return_value = tmp_path / "local"
         yield {"repo_config": repo_config, "execvpe": mock_execvpe}
 
 
@@ -166,20 +155,40 @@ def test_run_no_sandbox_strips_a_stale_inherited_opencode_config_env(
     assert "OPENCODE_CONFIG" not in env
 
 
-def test_run_no_sandbox_links_agents_skills_instructions_and_jsonc_from_repo_config(
+def test_run_no_sandbox_points_opencode_at_an_assembled_config_dir(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
     sandbox.run_no_sandbox()
 
-    config_home = tmp_path / "config" / "opencode"
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    config_dir = Path(env["OPENCODE_CONFIG_DIR"])
     repo_config = mocked_no_sandbox_env["repo_config"]
-    assert (config_home / "agents").resolve() == (repo_config / "agents").resolve()
-    assert (config_home / "skills").resolve() == (repo_config / "skills").resolve()
-    assert (config_home / "instructions").resolve() == (repo_config / "instructions").resolve()
-    assert (config_home / "opencode.jsonc").resolve() == (repo_config / "opencode.jsonc").resolve()
+    assert (config_dir / "agents").resolve() == (repo_config / "agents").resolve()
+    assert (config_dir / "skills").resolve() == (repo_config / "skills").resolve()
+    assert (config_dir / "opencode.jsonc").resolve() == (repo_config / "opencode.jsonc").resolve()
 
 
-def test_run_no_sandbox_honors_agents_and_skills_dir_overrides(
+def test_run_no_sandbox_never_touches_the_users_opencode_config(
+    tmp_path, mocked_no_sandbox_env
+) -> None:
+    """ocbox itself writes nothing under ~/.config/opencode: no symlinks, no
+    config. OpenCode, when actually run, reads that directory and installs its
+    plugin SDK there on its own account - see run_no_sandbox's docstring. This
+    test pins what ocbox does, with OpenCode's exec mocked out."""
+    users_config = tmp_path / "config" / "opencode"
+    users_config.mkdir(parents=True)
+    (users_config / "agents").mkdir()
+    (users_config / "agents" / "theirs.md").write_text("---\ndescription: mine\n---\n")
+
+    sandbox.run_no_sandbox()
+
+    assert (users_config / "agents" / "theirs.md").exists()
+    assert not (users_config / "agents" / "theirs.md").is_symlink()
+    assert not (users_config / "opencode.jsonc").exists()
+    assert not (users_config / "skills").exists()
+
+
+def test_run_no_sandbox_assembled_dir_honors_the_dir_overrides(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
     custom_agents = tmp_path / "my-agents"
@@ -187,26 +196,62 @@ def test_run_no_sandbox_honors_agents_and_skills_dir_overrides(
 
     sandbox.run_no_sandbox(agents_dir=custom_agents)
 
-    config_home = tmp_path / "config" / "opencode"
-    assert (config_home / "agents").resolve() == custom_agents.resolve()
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    assert (Path(env["OPENCODE_CONFIG_DIR"]) / "agents").resolve() == custom_agents.resolve()
 
 
-def test_run_no_sandbox_honors_instructions_dir_override(tmp_path, mocked_no_sandbox_env) -> None:
-    custom_instructions = tmp_path / "my-instructions"
-    custom_instructions.mkdir()
+def test_run_no_sandbox_ignores_a_jsonc_left_in_the_home_directory(
+    tmp_path, monkeypatch, mocked_no_sandbox_env
+) -> None:
+    """opencode-config/opencode.jsonc is the only default. A copy under
+    ~/.config/ocbox - which older versions preferred - must not shadow it."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    stray = tmp_path / "home" / ".config" / "ocbox" / "opencode.jsonc"
+    stray.parent.mkdir(parents=True)
+    stray.write_text('{"provider": {"local": {}}}')
 
-    sandbox.run_no_sandbox(instructions_dir=custom_instructions)
+    sandbox.run_no_sandbox()
 
-    config_home = tmp_path / "config" / "opencode"
-    assert (config_home / "instructions").resolve() == custom_instructions.resolve()
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    linked = Path(env["OPENCODE_CONFIG_DIR"]) / "opencode.jsonc"
+    assert linked.resolve() == (mocked_no_sandbox_env["repo_config"] / "opencode.jsonc").resolve()
 
 
-def test_run_no_sandbox_propagates_link_errors_as_no_sandbox_error(
+def test_run_no_sandbox_assembles_its_config_dir_inside_the_package(
     tmp_path, mocked_no_sandbox_env
 ) -> None:
-    config_home = tmp_path / "config" / "opencode"
-    (config_home / "agents").mkdir(parents=True)
-    (config_home / "agents" / "mine.md").write_text("not ocbox's")
+    sandbox.run_no_sandbox()
 
-    with pytest.raises(sandbox.NoSandboxError):
-        sandbox.run_no_sandbox()
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    assert Path(env["OPENCODE_CONFIG_DIR"]).is_relative_to(tmp_path / "local")
+
+
+def test_run_no_sandbox_agents_md_is_the_host_version_plus_team_rules(
+    mocked_no_sandbox_env,
+) -> None:
+    """The sandbox description must never reach an agent running on the host."""
+    sandbox.run_no_sandbox()
+
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    agents_md = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
+    assert not agents_md.is_symlink()
+    text = agents_md.read_text()
+    assert text.index("# Environment: your machine") < text.index("# Team rules")
+    assert "# Environment: sandbox" not in text
+
+
+def test_run_no_sandbox_drops_agents_md_when_nothing_composes_one(
+    mocked_no_sandbox_env,
+) -> None:
+    repo_config = mocked_no_sandbox_env["repo_config"]
+    sandbox.run_no_sandbox()
+    (repo_config / "AGENTS.md").unlink()
+    for env_file in (repo_config / "environments").iterdir():
+        env_file.unlink()
+
+    sandbox.run_no_sandbox()
+
+    _, _, env = mocked_no_sandbox_env["execvpe"].call_args.args
+    agents_md = Path(env["OPENCODE_CONFIG_DIR"]) / "AGENTS.md"
+    assert not agents_md.exists()
+    assert not agents_md.is_symlink()

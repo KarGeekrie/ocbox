@@ -6,8 +6,6 @@ from ocbox.packages import prompt_extra_packages
 
 def _cfg(**overrides) -> Config:
     defaults = {
-        "llm_host": "127.0.0.1",
-        "llm_port": 1234,
         "extra_apt_default": ["git", "vim"],
         "extra_uv_default": ["ruff"],
     }

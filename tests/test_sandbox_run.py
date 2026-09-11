@@ -8,6 +8,7 @@ its `if mode == "web"` guard gets caught.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,9 +18,7 @@ from ocbox.config import Config
 
 
 def _cfg(**overrides) -> Config:
-    defaults = {"llm_host": "127.0.0.1", "llm_port": 11434}
-    defaults.update(overrides)
-    return Config(**defaults)
+    return Config(**overrides)
 
 
 @pytest.fixture
@@ -30,9 +29,15 @@ def mocked_run_env(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     (data_dir / "agents").mkdir()
-    (data_dir / "opencode.jsonc").write_text("{}")
+    (data_dir / "opencode.jsonc").write_text(
+        '{\n  // the team LLM\n  "provider": {"local": {"options": '
+        '{"baseURL": "http://10.1.2.3:4567/v1"}}},\n}\n'
+    )
+    (data_dir / "environments").mkdir()
+    (data_dir / "environments" / "sandbox.md").write_text("# Environment: sandbox\n")
+    (data_dir / "environments" / "no-sandbox.md").write_text("# Environment: your machine\n")
+    (data_dir / "AGENTS.md").write_text("# Team rules\n")
     (data_dir / "skills").mkdir()
-    (data_dir / "instructions").mkdir()
 
     with (
         patch("ocbox.sandbox.PodmanClient") as mock_podman_cls,
@@ -178,3 +183,46 @@ def test_run_web_mode_detach_child_continues_the_normal_flow(tmp_path, mocked_ru
     mock_daemonize.assert_called_once()
     mocked_run_env["network"].start_llm_relay.assert_called_once()
     mocked_run_env["launch"].assert_called_once()
+
+
+def test_run_relays_to_the_llm_named_in_opencode_jsonc(tmp_path, mocked_run_env) -> None:
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    args = mocked_run_env["network"].start_llm_relay.call_args.args
+    assert args[1:] == ("10.1.2.3", 4567)
+
+
+def test_run_points_opencode_at_the_relay_keeping_the_base_url_path(
+    tmp_path, mocked_run_env
+) -> None:
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    plan = mocked_run_env["launch"].call_args[0][0]
+    generated = json.loads(plan.opencode_config.read_text())
+    expected = f"http://127.0.0.1:{plan.container_llm_port}/v1"
+    assert generated["provider"]["local"]["options"]["baseURL"] == expected
+
+
+def test_run_fails_before_any_image_work_without_a_usable_base_url(
+    tmp_path, mocked_run_env
+) -> None:
+    data_dir = mocked_run_env["image"].repo_config_dir.return_value
+    (data_dir / "opencode.jsonc").write_text("{}")
+
+    with pytest.raises(sandbox.LlmEndpointError):
+        sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+    mocked_run_env["image"].ensure_base_image.assert_not_called()
+
+
+def test_run_mounts_a_sandbox_agents_md_listing_what_is_installed(
+    tmp_path, mocked_run_env
+) -> None:
+    with patch("ocbox.sandbox.prompt_extra_packages", return_value=(["git"], ["py-spy"])):
+        sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    plan = mocked_run_env["launch"].call_args[0][0]
+    text = plan.global_agents_md.read_text()
+    assert text.index("# Environment: sandbox") < text.index("py-spy") < text.index("# Team rules")
+    assert "Extra system packages: git." in text
+    assert "Network: none" in text
+    assert "# Environment: your machine" not in text

@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ocbox's own local state for --no-sandbox: an OpenCode binary it installed and
+# the config directory it assembles. Kept inside the checkout, never committed.
+/.ocbox/

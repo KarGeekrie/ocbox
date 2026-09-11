@@ -8,11 +8,13 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ocbox import auth, image, network, project
-from ocbox.config import Config
+from ocbox import auth, image, jsonc, network, project
+from ocbox.config import Config, ConfigError
 from ocbox.packages import prompt_extra_packages
 from ocbox.podman_client import PodmanClient
 from ocbox.state import ProjectState
@@ -38,18 +40,17 @@ USER_CONFIG_MOUNT = "/home/ocbox/.config/opencode/opencode.jsonc"
 # generated config holding only the thing ocbox actually owns - the relay
 # endpoint. Also nests inside /home/ocbox, so it mounts after the volume.
 SKILLS_DIR_MOUNT = "/home/ocbox/.config/opencode/skills"
+# The AGENTS.md ocbox composes for this run, mounted as OpenCode's *global*
+# AGENTS.md. OpenCode combines it with the project's own AGENTS.md rather than
+# picking one - verified against opencode 1.18.29 by recording the request
+# bodies it sends to the LLM: with both files present, both reach the model.
+# Nests inside /home/ocbox like the directories above, so it mounts after the
+# volume. Optional content: no mount at all when the file doesn't exist.
+GLOBAL_AGENTS_MD_MOUNT = "/home/ocbox/.config/opencode/AGENTS.md"
 # UNVERIFIED (see AGENTS.md "Verification history"): unlike agents/skills,
-# OpenCode's `instructions` config key is (believed to be) not auto-discovered
-# from a fixed directory - it has to be listed explicitly, as glob patterns,
-# in opencode.jsonc's own `instructions` array. Mounted here anyway, at the
-# same sibling-of-the-config-file layout as agents/skills, so a *relative*
-# glob in opencode.jsonc (e.g. "instructions/*.md") resolves the same way
-# whether opencode.jsonc's own precedence-driven copy is this mount or, in
-# --no-sandbox mode, the real ~/.config/opencode/opencode.jsonc symlink.
-INSTRUCTIONS_DIR_MOUNT = "/home/ocbox/.config/opencode/instructions"
 # Root for --mount's extra working directories, one per basename
 # (<host-path>:/mnt/<basename>:rw), independent of /workspace and each other -
-# unlike agents/skills/instructions, nothing here nests inside another mount.
+# unlike agents/skills, nothing here nests inside another mount.
 #
 # CAVEAT (unverified - see AGENTS.md "Verification history"): the mount
 # itself makes a directory visible inside the container, but OpenCode's own
@@ -61,6 +62,11 @@ INSTRUCTIONS_DIR_MOUNT = "/home/ocbox/.config/opencode/instructions"
 # `permission` rules the user's own opencode.jsonc sets.
 EXTRA_MOUNTS_ROOT = "/mnt"
 
+# The container's podman network mode. "none" is the isolation guarantee, and
+# the sandbox AGENTS.md describes the network from this same value, so the agent
+# is told what the container actually gets rather than what someone remembered.
+SANDBOX_NETWORK = "none"
+
 
 @dataclass
 class RunPlan:
@@ -70,7 +76,6 @@ class RunPlan:
     opencode_config: Path
     agents_dir: Path
     skills_dir: Path
-    instructions_dir: Path
     user_config: Path
     data_volume: str
     container_name: str
@@ -80,6 +85,8 @@ class RunPlan:
     env_file: Path | None = None  # web-only: gates the forwarded UI, unused for tui
     memory_limit: str | None = None
     pids_limit: int | None = None
+    # AGENTS.md composed for this run, mounted as OpenCode's global one; None skips.
+    global_agents_md: Path | None = None
     # Additional host directories mounted read-write at /mnt/<name.name>,
     # alongside the primary `workspace` at /workspace. See EXTRA_MOUNTS_ROOT.
     extra_mounts: list[Path] = field(default_factory=list)
@@ -110,7 +117,7 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "--name",
         plan.container_name,
         "--network",
-        "none",
+        SANDBOX_NETWORK,
         "--userns",
         "keep-id",
         "--cap-drop",
@@ -143,10 +150,10 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "-v",
         f"{plan.skills_dir}:{SKILLS_DIR_MOUNT}:ro",
         "-v",
-        f"{plan.instructions_dir}:{INSTRUCTIONS_DIR_MOUNT}:ro",
-        "-v",
         f"{plan.user_config}:{USER_CONFIG_MOUNT}:ro",
     ]
+    if plan.global_agents_md is not None:
+        argv += ["-v", f"{plan.global_agents_md}:{GLOBAL_AGENTS_MD_MOUNT}:ro"]
     if plan.env_file is not None:
         argv += ["--env-file", str(plan.env_file)]
     argv += [
@@ -209,9 +216,6 @@ def daemonize(log_path: Path) -> int:
     return 0
 
 
-USER_CONFIG_PATH = Path.home() / ".config" / "ocbox" / "opencode.jsonc"
-
-
 # ocbox sets these itself: the web UI is reached through a relay bound to a
 # port ocbox chose, so a second --port/--hostname on the same command line
 # either conflicts or silently detaches OpenCode from the bridge.
@@ -251,24 +255,12 @@ def check_opencode_args(args: list[str], mode: str = "tui") -> None:
             )
 
 
-def _resolve_user_config() -> Path:
-    """The user's own OpenCode settings, or the packaged empty default.
-
-    Kept next to conf.py in ~/.config/ocbox/ because what belongs here - the
-    list of models your LLM server serves - is a property of that server, the
-    same thing LLM_HOST/LLM_PORT describe.
-    """
-    if USER_CONFIG_PATH.exists():
-        return USER_CONFIG_PATH
-    return image.repo_config_dir() / "opencode.jsonc"
-
-
 def _generate_opencode_config(base_url: str) -> dict:
     """Builds the single opencode.json ocbox feeds OpenCode, sandboxed or not.
 
     Only the provider is generated, because it is the only part ocbox owns:
     `base_url` is the relay bridging a sandboxed container to the user's LLM,
-    or - in --no-sandbox mode - LLM_HOST:LLM_PORT directly, no relay involved.
+    or - in --no-sandbox mode - opencode.jsonc's own baseURL, no relay involved.
     Agents and skills aren't here - they're files placed at the locations
     OpenCode already searches - and the models belong to the user's own
     opencode.jsonc, layered in as OpenCode's global config.
@@ -292,6 +284,108 @@ def _generate_opencode_config(base_url: str) -> dict:
     }
 
 
+class LlmEndpointError(ConfigError):
+    """Raised when opencode.jsonc doesn't name an LLM server ocbox can relay to."""
+
+
+@dataclass(frozen=True)
+class LlmEndpoint:
+    host: str
+    port: int
+    path: str
+
+
+def llm_endpoint(opencode_jsonc: Path) -> LlmEndpoint:
+    """Where the LLM server is, read from provider.local.options.baseURL.
+
+    opencode.jsonc is the one place the team names its LLM: OpenCode reads it
+    directly under --no-sandbox, and ocbox reads the same value to know what the
+    sandbox's relay has to dial, so the address is never written down twice.
+    """
+    try:
+        node: object = jsonc.loads(opencode_jsonc.read_text())
+    except (OSError, jsonc.JsoncError) as exc:
+        raise LlmEndpointError(f"Can't read {opencode_jsonc}: {exc}") from exc
+    for key in ("provider", "local", "options", "baseURL"):
+        node = node.get(key) if isinstance(node, dict) else None
+    if not isinstance(node, str) or not node.strip():
+        raise LlmEndpointError(
+            f"{opencode_jsonc} doesn't set provider.local.options.baseURL - set it to "
+            "the LLM server, e.g. http://127.0.0.1:11434/v1 for a local Ollama."
+        )
+    base_url = node.strip()
+    parts = urllib.parse.urlsplit(base_url)
+    if parts.scheme == "https":
+        raise LlmEndpointError(
+            f"baseURL {base_url!r} is https. A sandbox reaches the LLM through a plain "
+            "TCP relay that OpenCode sees at http://127.0.0.1, which no https "
+            "certificate can match - use the server's http address, or --no-sandbox."
+        )
+    try:
+        port = parts.port
+    except ValueError:
+        port = -1
+    if parts.scheme != "http" or not parts.hostname or port == -1:
+        raise LlmEndpointError(
+            f"baseURL {base_url!r} in {opencode_jsonc} isn't a usable "
+            "http://host[:port]/path address - is it still a placeholder?"
+        )
+    return LlmEndpoint(parts.hostname, port or 80, parts.path.rstrip("/"))
+
+
+def _sandbox_facts(
+    base_os: str,
+    apt_pkgs: list[str],
+    uv_pkgs: list[str],
+    extra_mounts: list[Path],
+    network: str = SANDBOX_NETWORK,
+) -> list[str]:
+    """What this particular sandbox has - generated, since it varies per run."""
+    if network == "none":
+        net = (
+            "- Network: none. The container has no network device besides loopback; "
+            "the only thing it reaches is the LLM serving you, through ocbox's relay. "
+            "Package installs, git fetch/push, curl and web lookups fail - say so "
+            "rather than retrying."
+        )
+    else:
+        net = f"- Network: available (podman network mode `{network}`)."
+    project_dirs = ["`/workspace` (the user's project)"]
+    project_dirs += [f"`{EXTRA_MOUNTS_ROOT}/{path.name}`" for path in extra_mounts]
+    return [
+        "## This sandbox",
+        "",
+        net,
+        f"- Base system: {base_os}, with python3, uv and curl.",
+        "- Extra system packages: " + (", ".join(apt_pkgs) if apt_pkgs else "none") + ".",
+        "- Extra Python packages (uv): " + (", ".join(uv_pkgs) if uv_pkgs else "none") + ".",
+        "- Project directories, where changes are real: " + ", ".join(project_dirs) + ".",
+        "- `/tmp` is scratch space, and most of the rest of the filesystem is read-only.",
+    ]
+
+
+def _compose_global_agents_md(environment: str, facts: list[str]) -> str | None:
+    """The global AGENTS.md for one mode: environment, then facts, then team rules.
+
+    opencode-config/environments/<environment>.md says where the agent runs - a
+    sandbox, or the user's own machine - the facts pin down this particular run,
+    and opencode-config/AGENTS.md carries the team's rules common to every mode.
+    Composed per run rather than shipped as one static file, so an agent is never
+    told it is sandboxed when it isn't.
+    """
+    config_dir = image.repo_config_dir()
+    sections: list[str] = []
+    environment_file = config_dir / "environments" / f"{environment}.md"
+    if environment_file.is_file():
+        sections.append(environment_file.read_text().strip())
+    if facts:
+        sections.append("\n".join(facts).strip())
+    team_rules = config_dir / "AGENTS.md"
+    if team_rules.is_file():
+        sections.append(team_rules.read_text().strip())
+    return "\n\n".join(sections) + "\n" if sections else None
+
+
 def run(
     cfg: Config,
     cwd: Path,
@@ -303,7 +397,6 @@ def run(
     cli_uv: list[str] | None = None,
     agents_dir: Path | None = None,
     skills_dir: Path | None = None,
-    instructions_dir: Path | None = None,
     user_config: Path | None = None,
     opencode_args: list[str] | None = None,
     host_web_port: int | None = None,
@@ -312,6 +405,9 @@ def run(
 ) -> int:
     if detach and mode != "web":
         raise ValueError("detach only applies to mode='web' - there's nothing to attach it to")
+
+    # Before any image work: fail fast if opencode.jsonc doesn't name a usable LLM.
+    llm = llm_endpoint(user_config or (image.repo_config_dir() / "opencode.jsonc"))
 
     podman = PodmanClient()
     slug = project.project_slug(cwd)
@@ -355,13 +451,24 @@ def run(
     container_web_port = cfg.container_web_port
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
-    resolved_instructions_dir = instructions_dir or (image.repo_config_dir() / "instructions")
-    resolved_user_config = user_config or _resolve_user_config()
+    # Only opencode-config/opencode.jsonc is the user's to touch; --opencode-config
+    # exists for a one-off run, and nothing in the home directory overrides it.
+    resolved_user_config = user_config or (image.repo_config_dir() / "opencode.jsonc")
+    global_agents_md = run_dir / "AGENTS.md"
+    agents_md_text = _compose_global_agents_md(
+        "sandbox", _sandbox_facts(cfg.base_os, apt_pkgs, uv_pkgs, list(extra_mounts or []))
+    )
+    if agents_md_text is None:
+        global_agents_md.unlink(missing_ok=True)
+        resolved_global_agents_md = None
+    else:
+        global_agents_md.write_text(agents_md_text)
+        resolved_global_agents_md = global_agents_md
 
     opencode_config_path = run_dir / "opencode.json"
     opencode_config_path.write_text(
         json.dumps(
-            _generate_opencode_config(f"http://127.0.0.1:{container_llm_port}/v1"), indent=2
+            _generate_opencode_config(f"http://127.0.0.1:{container_llm_port}{llm.path}"), indent=2
         )
     )
 
@@ -376,9 +483,9 @@ def run(
         opencode_config=opencode_config_path,
         agents_dir=resolved_agents_dir,
         user_config=resolved_user_config,
+        global_agents_md=resolved_global_agents_md,
         opencode_args=list(opencode_args or []),
         skills_dir=resolved_skills_dir,
-        instructions_dir=resolved_instructions_dir,
         data_volume=data_volume,
         container_name=container_name,
         container_web_port=container_web_port,
@@ -401,7 +508,7 @@ def run(
             )
             return 0
 
-    llm_relay = network.start_llm_relay(run_dir, cfg.llm_host, cfg.llm_port)
+    llm_relay = network.start_llm_relay(run_dir, llm.host, llm.port)
     bridges = network.NetworkBridges(
         llm_relay=llm_relay, llm_sock=run_dir / "llm.sock", run_dir=run_dir
     )
@@ -460,68 +567,97 @@ OPENCODE_INSTALL_URL = "https://opencode.ai/install"
 
 
 def _find_or_install_opencode() -> str:
-    """Locates `opencode` on PATH, or installs it via the same official
-    script data/distros/*/Containerfile uses to build the sandbox image -
-    just run on the host instead of during an image build.
+    """Locates an OpenCode binary, installing one into the package if none exists.
+
+    An installation the user already has wins: `opencode` on PATH, or the
+    standard ~/.opencode/bin. Otherwise ocbox uses - or installs - its own copy
+    in the checkout's .ocbox/bin, so nothing is written to the user's home.
+
+    The official installer hardcodes $HOME/.opencode/bin, so it runs with HOME
+    pointed at a throwaway directory inside .ocbox/ and the binary is moved out
+    of it. --no-modify-path keeps it off shell rc files, even that throwaway
+    HOME's.
     """
     found = shutil.which("opencode")
     if found:
         return found
-    fallback = Path.home() / ".opencode" / "bin" / "opencode"
-    if fallback.exists():
-        return str(fallback)
+    standard = Path.home() / ".opencode" / "bin" / "opencode"
+    if standard.exists():
+        return str(standard)
+    local_dir = image.repo_local_dir()
+    local_bin = local_dir / "bin" / "opencode"
+    if local_bin.exists():
+        return str(local_bin)
 
-    print("ocbox: opencode not found - installing it...", file=sys.stderr)
+    print(
+        f"ocbox: opencode not found - installing it into {local_bin.parent}...",
+        file=sys.stderr,
+    )
     curl = subprocess.run(
         ["curl", "-fsSL", OPENCODE_INSTALL_URL], capture_output=True, check=True
     )
-    # The installer assumes bash (`set -euo pipefail` on its own line 2) -
-    # piping into plain `sh` breaks wherever that's dash, e.g. Debian/Ubuntu.
-    subprocess.run(["bash"], input=curl.stdout, check=True)
-
-    found = shutil.which("opencode")
-    if found:
-        return found
-    if fallback.exists():
-        return str(fallback)
-    raise NoSandboxError(
-        "opencode installed but isn't on PATH and isn't at "
-        "~/.opencode/bin/opencode - add its install location to PATH and re-run."
-    )
-
-
-def _opencode_config_home() -> Path:
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".config"
-    return base / "opencode"
-
-
-def _link_into_opencode_config(name: str, source: Path) -> None:
-    """Symlinks OpenCode's real global `name` path at `source` - the host
-    equivalent of a sandboxed run's read-only bind-mount. Refuses to touch
-    anything that isn't already ocbox's own symlink, so a real pre-existing
-    agents/skills/opencode.jsonc is never silently replaced.
-    """
-    target = _opencode_config_home() / name
-    if target.is_symlink():
-        if target.resolve() == source.resolve():
-            return
-        target.unlink()
-    elif target.exists():
-        raise NoSandboxError(
-            f"{target} already exists and isn't managed by ocbox - move it "
-            "aside (or fold what you want into opencode-config/) before "
-            "using --no-sandbox, which needs to symlink it there."
+    local_bin.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=local_dir, prefix="install-") as install_home:
+        # The installer assumes bash (`set -euo pipefail` on its own line 2) -
+        # piping into plain `sh` breaks wherever that's dash, e.g. Debian/Ubuntu.
+        subprocess.run(
+            ["bash", "-s", "--", "--no-modify-path"],
+            input=curl.stdout,
+            check=True,
+            env={**os.environ, "HOME": install_home},
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.symlink_to(source, target_is_directory=source.is_dir())
+        installed = Path(install_home) / ".opencode" / "bin" / "opencode"
+        if not installed.exists():
+            raise NoSandboxError(
+                f"the OpenCode installer ran but didn't produce {installed} - "
+                "install OpenCode yourself and re-run."
+            )
+        shutil.move(str(installed), local_bin)
+    return str(local_bin)
+
+
+
+def _build_no_sandbox_config_dir(
+    agents_dir: Path,
+    skills_dir: Path,
+    user_config: Path,
+    agents_md: str | None = None,
+) -> Path:
+    """Assembles the config directory OpenCode is pointed at under --no-sandbox.
+
+    OPENCODE_CONFIG_DIR takes a single directory, but --agents-dir/--skills-dir
+    can point anywhere, so this stitches them together with symlinks, next to
+    the AGENTS.md composed for this mode. It lives in the checkout's gitignored
+    .ocbox/ rather than under $HOME, keeping what ocbox writes inside the
+    package; OpenCode's own plugin install into this directory lands there too.
+
+    Verified against opencode 1.18.29 rather than assumed: agents, skills and
+    opencode.jsonc all load from a directory given through OPENCODE_CONFIG_DIR;
+    a config layered over it with OPENCODE_CONFIG merges rather than replacing
+    it; and an AGENTS.md inside it is sent to the model as the global one,
+    alongside the project's (checked by recording the request bodies OpenCode
+    sends to a stub LLM).
+    """
+    config_dir = image.repo_local_dir() / "no-sandbox" / "opencode-config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    links = {"agents": agents_dir, "skills": skills_dir, "opencode.jsonc": user_config}
+    for name, source in links.items():
+        link = config_dir / name
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(source, target_is_directory=source.is_dir())
+    agents_md_path = config_dir / "AGENTS.md"
+    if agents_md_path.is_symlink() or agents_md_path.exists():
+        agents_md_path.unlink()
+    if agents_md is not None:
+        agents_md_path.write_text(agents_md)
+    return config_dir
 
 
 def run_no_sandbox(
     *,
     agents_dir: Path | None = None,
     skills_dir: Path | None = None,
-    instructions_dir: Path | None = None,
     user_config: Path | None = None,
     opencode_args: list[str] | None = None,
 ) -> int:
@@ -529,33 +665,49 @@ def run_no_sandbox(
 
     Trades ocbox's whole sandboxing story for convenience: it still installs
     OpenCode if missing and wires up the same agents/skills/model config from
-    opencode-config/ (symlinked into OpenCode's real global config directory,
-    since there's no bind-mount to do it for us), but nothing here limits
-    what OpenCode can touch on this machine or reach over the network. Use
-    --tui or the default web mode for the actual sandbox.
+    opencode-config/, but nothing here limits what OpenCode can touch on this
+    machine or reach over the network. Use --tui or the default web mode for
+    the actual sandbox.
 
-    Unlike the sandboxed modes, this needs no LLM_HOST/LLM_PORT from conf.py
-    and generates no provider override: there's no relay to point OpenCode
-    at, so opencode.jsonc's own baseURL - reachable directly, since nothing
-    here is network-isolated - is used exactly as the user wrote it.
+    Everything is passed by environment variable rather than written into the
+    user's home: OPENCODE_CONFIG_DIR points at a directory ocbox assembles in
+    the checkout's .ocbox/, and ocbox itself writes nothing under
+    ~/.config/opencode - though OpenCode, on its own account, installs its
+    plugin SDK there at startup.
+    OpenCode does still *read* that directory alongside the one it is given -
+    measured against 1.18.29 with a marker in each file: the user's own
+    opencode.jsonc and agents/ are merged in, while their AGENTS.md is replaced
+    by the team's. So unlike a sandbox, a personal global config comes along.
+
+    Unlike the sandboxed modes there is no relay: opencode.jsonc's baseURL is
+    reachable directly, since nothing here is network-isolated, and OpenCode
+    uses it as written.
     """
     opencode_bin = _find_or_install_opencode()
 
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
     resolved_skills_dir = skills_dir or (image.repo_config_dir() / "skills")
-    resolved_instructions_dir = instructions_dir or (image.repo_config_dir() / "instructions")
-    resolved_user_config = user_config or _resolve_user_config()
+    # Only opencode-config/opencode.jsonc is the user's to touch; --opencode-config
+    # exists for a one-off run, and nothing in the home directory overrides it.
+    resolved_user_config = user_config or (image.repo_config_dir() / "opencode.jsonc")
+    agents_md_text = _compose_global_agents_md("no-sandbox", [])
 
-    _link_into_opencode_config("agents", resolved_agents_dir)
-    _link_into_opencode_config("skills", resolved_skills_dir)
-    _link_into_opencode_config("instructions", resolved_instructions_dir)
-    _link_into_opencode_config("opencode.jsonc", resolved_user_config)
+    config_dir = _build_no_sandbox_config_dir(
+        resolved_agents_dir,
+        resolved_skills_dir,
+        resolved_user_config,
+        agents_md_text,
+    )
 
     print(
         "ocbox: running OpenCode directly on this machine - no sandbox, no "
         "network isolation. Ctrl-C or OpenCode's own quit key to stop.\n"
     )
     env = os.environ.copy()
-    env.pop("OPENCODE_CONFIG", None)  # use the symlinked global config, not a stale override
+    env["OPENCODE_CONFIG_DIR"] = str(config_dir)
+    # The assembled directory already carries the right opencode.jsonc, and a
+    # stale OPENCODE_CONFIG inherited from a sandboxed run would point at a
+    # relay that isn't running here.
+    env.pop("OPENCODE_CONFIG", None)
     os.execvpe(opencode_bin, [opencode_bin, *(opencode_args or [])], env)
     return 0  # unreachable - execvpe replaces this process on success
