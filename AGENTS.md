@@ -187,8 +187,22 @@ opencode 1.18.29 and its published schema:
   OpenCode process's `XDG_CONFIG_HOME` at an ocbox-owned directory. The user's
   own directory then stays byte-for-byte unchanged, their personal agents and
   models stop merging in, and the install lands in the ocbox-owned directory.
-  Not adopted, since it also changes `XDG_CONFIG_HOME` for every tool OpenCode
-  spawns; left as a decision.
+  Rejected: it also changes `XDG_CONFIG_HOME` for every tool OpenCode spawns,
+  and the project's position is that only the sandboxed modes guarantee the
+  host's integrity - `--no-sandbox` behaves like a standard OpenCode install
+  and is documented as such.
+- **`--no-sandbox` install path, end to end on a real host**, after
+  `opencode uninstall -f` plus removing the binary it leaves behind. With
+  OpenCode absent, ocbox runs the official install script - latest release,
+  1.18.30 here while the sandbox image had 1.18.29, since neither is pinned -
+  the shell rc files stay byte-for-byte unchanged, and OpenCode lists
+  `chat`/`review` next to `build`/`plan`. With it present, nothing is installed
+  (4 s). `debug config` shows the team's `share`, `small_model` and models,
+  and a skill given through `--skills-dir` is discovered. Short commands like
+  `agent list` left only a `.gitignore` in `~/.config/opencode`; the plugin SDK
+  install appeared with a real `run`. `opencode uninstall` removes the PATH
+  line from `~/.zshrc` but not the binary, and ocbox's reinstall doesn't put
+  the PATH line back.
 - **Open: `opencode run` on the host can stall right after `init`.** Seen as
   ~11 log lines ending at `init`, then silence, with no request reaching the
   LLM (confirmed by a recording stub) until killed. It happened in all three
@@ -243,6 +257,13 @@ Confirmed working this way:
   Containerfile itself (the actual `dnf install` line) has **not** been
   built against a real Rocky mirror - the dev sandbox this was validated in
   had no route to dl.rockylinux.org. Verify it builds before relying on it.
+- `--uv`/`EXTRA_UV_DEFAULT` on the Debian/Ubuntu images: uv refuses
+  `uv pip install --system` on a Python marked externally managed (PEP 668),
+  which broke the project image build on the default `BASE_OS` until
+  `--break-system-packages` was added. Checked with a real build installing
+  `py-spy`, then run under the sandbox's security flags: `py-spy record --
+  <cmd>` profiles correctly, while attaching with `--pid` is refused for lack
+  of `CAP_SYS_PTRACE`.
 
 **Gotcha found along the way**: rootless `podman build` sets up build-time
 networking (via slirp4netns) by default even when the build itself does no

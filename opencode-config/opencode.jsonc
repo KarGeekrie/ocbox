@@ -1,10 +1,13 @@
 {
-  // TEAM CONFIGURATION - maintained centrally, do not edit.
+  // TEAM CONFIGURATION - pre-configured; editing it is possible but not
+  // recommended.
   //
   // This repository is a preconfigured setup for our team, not a general-
   // purpose package: this file already declares the team's provider, models,
-  // permissions and defaults. Changes go through a reviewed commit here, so
-  // every sandbox stays identical.
+  // permissions and defaults. It is the only OpenCode file in your scope, and
+  // ocbox hands it to OpenCode in every mode. A change made for one person
+  // makes their OpenCode behave differently from everyone else's; a change
+  // everyone needs belongs in a commit here.
   //
   // How ocbox uses it: mounted into every sandbox as OpenCode's *global*
   // config, and in --no-sandbox mode placed in the config directory ocbox
