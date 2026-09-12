@@ -256,6 +256,43 @@ def test_main_rejects_mount_of_a_file(tmp_path, capsys) -> None:
     assert "not a directory" in capsys.readouterr().err
 
 
+def test_main_rejects_agents_dir_that_is_not_a_directory(tmp_path, capsys) -> None:
+    exit_code = main(["--agents-dir", str(tmp_path / "nope")])
+    assert exit_code == 1
+    assert "--agents-dir" in capsys.readouterr().err
+
+
+def test_main_rejects_opencode_config_that_is_not_a_file(tmp_path, capsys) -> None:
+    a_dir = tmp_path / "adir"
+    a_dir.mkdir()
+    exit_code = main(["--opencode-config", str(a_dir)])
+    assert exit_code == 1
+    assert "--opencode-config" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", return_value=0)
+def test_main_resolves_agents_dir_to_an_absolute_path(
+    mock_run, mock_config, mock_preflight, tmp_path, monkeypatch
+) -> None:
+    """A relative --agents-dir would otherwise reach `podman -v` as a named
+    volume; it must be resolved to an absolute path first."""
+    agents = tmp_path / "myagents"
+    agents.mkdir()
+    monkeypatch.chdir(tmp_path)
+    main(["--agents-dir", "myagents"])
+    passed = mock_run.call_args.kwargs["agents_dir"]
+    assert passed.is_absolute()
+    assert passed == agents.resolve()
+
+
+def test_main_rejects_mount_without_a_basename(tmp_path, capsys, monkeypatch) -> None:
+    exit_code = main(["--mount", "/"])
+    assert exit_code == 1
+    assert "basename" in capsys.readouterr().err
+
+
 def test_main_rejects_mounts_with_colliding_basenames(tmp_path, capsys) -> None:
     a = tmp_path / "one" / "shared"
     b = tmp_path / "two" / "shared"

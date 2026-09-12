@@ -149,10 +149,34 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ocbox: {exc}", file=sys.stderr)
             return 1
 
+    # These are handed straight to `podman -v <src>:<dst>` / OpenCode, and a
+    # relative path without a slash would be read by podman as a *named volume*,
+    # not the directory the user meant - so resolve to an absolute path and
+    # check the target exists, the same way --mount does below.
+    for attr, is_dir in (("agents_dir", True), ("skills_dir", True), ("opencode_config", False)):
+        value = getattr(args, attr)
+        if value is None:
+            continue
+        resolved = value.resolve()
+        ok = resolved.is_dir() if is_dir else resolved.is_file()
+        if not ok:
+            kind = "directory" if is_dir else "file"
+            flag = "--" + attr.replace("_", "-")
+            print(f"ocbox: {flag} {value} is not a {kind}", file=sys.stderr)
+            return 1
+        setattr(args, attr, resolved)
+
     extra_mounts = [p.resolve() for p in (args.mount or [])]
     for path in extra_mounts:
         if not path.is_dir():
             print(f"ocbox: --mount {path} is not a directory", file=sys.stderr)
+            return 1
+        if not path.name:
+            print(
+                f"ocbox: --mount {path} has no basename to mount it under "
+                "(/mnt/<basename>); mount a named subdirectory instead",
+                file=sys.stderr,
+            )
             return 1
     names = [p.name for p in extra_mounts]
     if len(names) != len(set(names)):

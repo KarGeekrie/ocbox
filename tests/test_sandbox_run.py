@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ocbox import sandbox
-from ocbox.config import Config
+from ocbox.config import Config, ConfigError
 
 
 def _cfg(**overrides) -> Config:
@@ -223,6 +223,47 @@ def test_run_fails_before_any_image_work_without_a_usable_base_url(
     with pytest.raises(sandbox.LlmEndpointError):
         sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
     mocked_run_env["image"].ensure_base_image.assert_not_called()
+
+
+def test_run_rejects_a_web_port_colliding_with_the_llm_relay_port(
+    tmp_path, mocked_run_env
+) -> None:
+    """The LLM relay binds a fixed loopback port inside the container; a
+    CONTAINER_WEB_PORT equal to it would make one of the two fail to bind."""
+    with pytest.raises(ConfigError, match="collides"):
+        sandbox.run(
+            _cfg(container_web_port=sandbox.CONTAINER_LLM_PORT),
+            tmp_path,
+            mode="web",
+            non_interactive=True,
+        )
+    mocked_run_env["image"].ensure_base_image.assert_not_called()
+
+
+def test_run_writes_generated_files_without_following_a_planted_symlink(
+    tmp_path, mocked_run_env, monkeypatch
+) -> None:
+    """A symlink left in the run dir by a compromised sandbox must not redirect
+    ocbox's write of opencode.json/AGENTS.md onto the link target."""
+    # runtime_dir nests under XDG_RUNTIME_DIR/ocbox/<slug>; wrap it to plant a
+    # symlink where the generated opencode.json will be written.
+    victim = tmp_path / "victim.txt"
+    victim.write_text("do not overwrite me")
+
+    real_runtime_dir = sandbox.project.runtime_dir
+
+    def _runtime_dir(slug):
+        d = real_runtime_dir(slug)
+        (d / "opencode.json").symlink_to(victim)
+        return d
+
+    monkeypatch.setattr(sandbox.project, "runtime_dir", _runtime_dir)
+
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    assert victim.read_text() == "do not overwrite me"
+    plan = mocked_run_env["launch"].call_args[0][0]
+    assert not plan.opencode_config.is_symlink()
 
 
 def test_run_mounts_a_sandbox_agents_md_listing_what_is_installed(
