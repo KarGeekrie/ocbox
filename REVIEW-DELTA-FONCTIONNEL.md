@@ -14,10 +14,11 @@
 > disponible et utilisé pour rejouer les scénarios d'isolation.
 > Branche : `review/delta-fonctionnel`.
 
-> **Statut :** les 12 points ci-dessous ont reçu un correctif dans les commits
-> suivants de cette même branche (voir la description de la PR pour la
-> correspondance point→correctif). `pytest` **244 passed, 6 skipped**,
-> `ruff` clean, et la suite d'intégration Podman **6 passed** après correctifs.
+> **Statut :** chaque point ci-dessous porte son **✅ Correctif appliqué** (fichiers
+> touchés + tests), livrés sur cette branche (PR
+> [#8](https://github.com/KarGeekrie/ocbox/pull/8)). Après correctifs :
+> `pytest` **244 passed, 6 skipped**, `ruff check src tests` clean, suite
+> d'intégration Podman réelle **6 passed**.
 
 Légende de sévérité :
 🔴 bug fonctionnel ou risque sécurité · 🟠 écart doc/code notable ·
@@ -138,8 +139,13 @@ depuis `~/projects/MyApp` (cas très courant) échouera au build d'image avec un
 erreur Podman brute. Le README (« cd ~/projects/myapp ») n'utilise que du
 minuscule, donc le problème est invisible dans la doc.
 
-**Correctif suggéré** : normaliser le préfixe (minuscules + `[^a-z0-9_.-]`→`-`)
-avant le hash ; le hash garantit déjà l'unicité, le préfixe n'est que lisibilité.
+**✅ Correctif appliqué** — `src/ocbox/project.py` : `project_slug` met le nom
+en minuscules et remplace toute suite de caractères hors `[a-z0-9]` par `-`
+(strip des `-` de bord) avant d'ajouter le hash ; si le préfixe est vide, le
+slug est le hash seul. Le hash sha256 continue de garantir l'unicité par chemin
+même quand deux noms se normalisent pareil.
+Tests : `tests/test_project.py::test_project_slug_normalises_uppercase_and_spaces`
+et `::test_project_slug_still_unique_when_prefixes_collapse_together`.
 
 ---
 
@@ -173,15 +179,21 @@ choisie par l'attaquant), qui suppose un conteneur déjà compromis + un second
 run — mais c'est précisément la frontière que le projet promet de tenir
 (« Only these sandboxed modes protect the host machine »).
 
-**Correctifs suggérés** (défense en profondeur) :
-- `write_env_file` : ajouter `O_NOFOLLOW` (et idem pour l'écriture de
-  `opencode.json`/`AGENTS.md` dans `run_dir`).
-- teardown : ne pas dépendre de `ignore_errors=True` pour la sécurité ;
-  vérifier/rétablir les perms de `run_dir` avant réécriture, ou recréer un
-  `run_dir` neuf par run.
-- Envisager que `/run/ocbox` ne soit pas dans le même userns d'écriture, ou
-  monter les fichiers générés individuellement en `:ro` plutôt que le dossier
-  entier en `:rw` (seules les sockets ont besoin d'être écrites par le conteneur).
+**✅ Correctif appliqué** (défense en profondeur) :
+- `src/ocbox/auth.py` : `write_env_file` fait `os.unlink` puis
+  `os.open(..., O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW)` → ne suit plus un symlink.
+- `src/ocbox/sandbox.py` : nouveau helper `_write_private()` (même schéma
+  unlink + `O_NOFOLLOW|O_EXCL`) utilisé pour l'écriture de `opencode.json` et
+  de l'`AGENTS.md` composé ; le log de `--detach` (`daemonize`) ouvre aussi son
+  fichier avec `O_NOFOLLOW`.
+- `src/ocbox/project.py` : `runtime_dir` réaffirme `0700` même sur un dossier
+  déjà existant, pour qu'un `/run/ocbox` remis en `0500` par le conteneur ne
+  bloque plus le nettoyage du teardown.
+
+Tests : `tests/test_sandbox_run.py::test_run_writes_generated_files_without_following_a_planted_symlink`
+et `tests/test_project.py::test_runtime_dir_reasserts_private_perms_on_an_existing_dir`.
+*(Restent hors périmètre de ce correctif, à considérer plus tard : monter les
+fichiers générés individuellement en `:ro` plutôt que tout le run dir en `:rw`.)*
 
 ---
 
@@ -201,8 +213,18 @@ C'est exactement le type de « feature qui ne fait rien silencieusement » que
 l'AGENTS.md du projet dit vouloir éviter côté OpenCode ; ici c'est côté ocbox.
 Le README liste les clés mais ne prévient d'aucun garde-fou.
 
-**Correctif suggéré** : valider que les listes sont des listes, et refuser
-(ou avertir sur) les attributs majuscules inconnus du module conf.py.
+**✅ Correctif appliqué** — `src/ocbox/config.py` :
+- helper `_string_list()` : `EXTRA_APT_DEFAULT`/`EXTRA_UV_DEFAULT` doivent être
+  des listes/tuples ; une chaîne (ou autre) lève une `ConfigError` explicite
+  (`must be a list … e.g. ["git"]`).
+- toute variable `ALL_CAPS` du module conf.py absente de `KNOWN_SETTINGS`
+  (et non déjà rejetée par `MOVED_TO_OPENCODE_JSONC`) déclenche un avertissement
+  sur stderr nommant la clé et suggérant les clés valides.
+
+Tests : `tests/test_config.py::test_extra_apt_default_as_a_bare_string_is_rejected`,
+`::test_extra_uv_default_as_a_bare_string_is_rejected`,
+`::test_unrecognised_setting_is_ignored_with_a_warning`,
+`::test_known_settings_do_not_warn`.
 
 ---
 
@@ -221,8 +243,15 @@ Donc `ocbox --tui --agents-dir agents` (relatif, sans `./`) monterait un volume
 vide au lieu du dossier `agents/`, et OpenCode ne verrait aucun agent — sans
 erreur. Un chemin absolu fonctionne, mais rien ne l'impose ni ne le documente.
 
-**Correctif suggéré** : `.resolve()` ces trois options comme `--mount`, et
-vérifier leur existence (comme `--mount` vérifie `is_dir()`).
+**✅ Correctif appliqué** — `src/ocbox/cli.py` : avant tout le reste, `main()`
+fait `.resolve()` sur `--agents-dir`/`--skills-dir`/`--opencode-config` fournis
+et vérifie l'existence de la cible (`is_dir()` pour les deux dossiers,
+`is_file()` pour la config), avec un message d'erreur nommant le flag ; la
+valeur absolue est réécrite dans `args` avant d'être transmise à `run()`/
+`run_no_sandbox()`.
+Tests : `tests/test_cli.py::test_main_rejects_agents_dir_that_is_not_a_directory`,
+`::test_main_rejects_opencode_config_that_is_not_a_file`,
+`::test_main_resolves_agents_dir_to_an_absolute_path`.
 
 ---
 
@@ -238,9 +267,13 @@ vérifier leur existence (comme `--mount` vérifie `is_dir()`).
   `.../sota-review/*` en `external_directory`, or ces skills n'existent nulle
   part dans le dépôt. Config résiduelle pointant vers des dossiers absents.
 
-**Correctif suggéré** : livrer au moins le skill d'exemple, ou retirer les
-entrées `code-review`/`sota-review` du `opencode.jsonc` d'équipe, et clarifier
-dans le README que le dossier est vide par défaut.
+**✅ Correctif appliqué** — `opencode-config/opencode.jsonc` : les deux entrées
+`allow` vers `code-review`/`sota-review` sont retirées ; `external_directory` ne
+garde que `"*": "deny"`, avec un commentaire rappelant que `--mount` ajoute les
+`"/mnt/<name>/**": "allow"` par run. (Retrait sans effet fonctionnel : elles
+autorisaient des dossiers de skills inexistants.) Le point « aucun `SKILL.md`
+livré » n'est pas un bug de code — laissé tel quel ; le README documente
+« comment en écrire ».
 
 ---
 
@@ -258,9 +291,13 @@ dépôt hors sandbox. Le README présente `conf.py` comme « settings » sans
 signaler cette surface de confiance. À noter d'autant que l'outil vise
 justement à se protéger de code non fiable.
 
-**Correctif suggéré** : au minimum documenter le risque ; idéalement, parser un
-sous-ensemble déclaratif (TOML) plutôt qu'exécuter du Python de projet, ou
-n'exécuter le `ocbox.conf.py` projet qu'après confirmation.
+**✅ Correctif appliqué** — `README.md` (section conf.py) : encadré signalant
+que les deux `conf.py` sont du Python **exécuté sur l'hôte** avant tout sandbox
+— le `ocbox.conf.py` d'un projet s'exécute au simple `cd` + `ocbox` — et
+invitant à traiter le `ocbox.conf.py` d'un dépôt non fiable comme tout code
+qu'on s'apprête à lancer. *(Le passage à un format déclaratif type TOML est
+volontairement laissé de côté : changement de surface plus large, à décider par
+l'équipe.)*
 
 ---
 
@@ -273,8 +310,11 @@ vérifie qu'ils diffèrent : `CONTAINER_WEB_PORT = 8081` en `conf.py` est accept
 sans erreur (rejoué), et les deux relais de l'`entrypoint.sh` tenteraient de
 lier `127.0.0.1:8081` dans le conteneur → conflit et run non fonctionnel.
 
-**Correctif suggéré** : dériver aussi le port LLM d'une constante/config et
-rejeter l'égalité des deux ports au démarrage.
+**✅ Correctif appliqué** — `src/ocbox/sandbox.py` : le port LLM devient la
+constante de module `CONTAINER_LLM_PORT` (8081), et `run()` lève une
+`ConfigError` claire en mode web si `cfg.container_web_port == CONTAINER_LLM_PORT`,
+avant tout travail d'image.
+Test : `tests/test_sandbox_run.py::test_run_rejects_a_web_port_colliding_with_the_llm_relay_port`.
 
 ---
 
@@ -286,6 +326,11 @@ permission `"/mnt//**": "allow"`. La collision de basenames est bien gardée,
 mais pas le basename vide. Cas extrême (monter `/` est déjà absurde), mais
 mérite un rejet explicite.
 
+**✅ Correctif appliqué** — `src/ocbox/cli.py` : la boucle de validation des
+`--mount` refuse désormais un chemin sans basename (`not path.name`) avec un
+message dédié.
+Test : `tests/test_cli.py::test_main_rejects_mount_without_a_basename`.
+
 ---
 
 ### 🟡 9 — `OCBOX_SKIP_UPDATE_CHECK=0` désactive aussi le check
@@ -296,8 +341,10 @@ vide, `"0"`/`"false"` inclus (rejoué : `=0` → check ignoré). Idiome courant,
 mais le README ne parle que de `=1` ; un utilisateur posant `=0` pour
 « réactiver » obtiendrait l'inverse.
 
-**Correctif suggéré** : documenter « toute valeur non vide », ou tester
-explicitement contre `{"1","true","yes"}`.
+**✅ Correctif appliqué** — `README.md` (section Updating) : précise que **toute
+valeur non vide** désactive le check (`=0` et `=false` compris) et qu'il faut
+*retirer* la variable pour le réactiver. Sémantique inchangée (documentation),
+pour ne pas casser les usages existants qui posent une valeur quelconque.
 
 ---
 
@@ -311,7 +358,11 @@ relay » — inexact pour ce mode (le TUI n'a pas de relais web). Sur-restrictio
 bénigne, mais le message induit en erreur. (Le TUI OpenCode nu n'accepte de
 toute façon pas `--port`, donc pas de perte de fonctionnalité.)
 
----
+**✅ Correctif appliqué** — `src/ocbox/sandbox.py` : le refus est conservé (garde
+défensive) mais le message ne prétend plus que « ocbox les fixe » dans
+l'invocation courante ; il explique qu'ocbox contrôle la liaison d'OpenCode (en
+mode web il les pose pour le brancher au relais) et renvoie vers `--web-port`.
+Le test existant `test_check_opencode_args_rejects_flags_ocbox_owns` reste vert.
 
 ## Notes diverses (non bloquantes)
 
@@ -326,8 +377,9 @@ toute façon pas `--port`, donc pas de perte de fonctionnalité.)
 - 🟢 **12 — Images orphelines** : chaque update reconstruit la base en
   `--no-cache`, laissant l'ancienne base et les images projet en dangling.
   `podman system df` sur la machine de dev montre 115 images / 1,47 Go
-  « 100% reclaimable ». Le README « Updating » ne mentionne aucun `podman image
-  prune`. Purge manuelle à documenter.
+  « 100% reclaimable ». **✅ Correctif appliqué** — `README.md` (section Updating)
+  documente désormais l'accumulation et pointe `podman image prune` /
+  `podman system prune` (ocbox ne supprime jamais d'image lui-même).
 - 🟢 **`rich`** est déclaré en extra `pretty` mais **jamais importé** dans
   `src/` — extra mort (inoffensif).
 - 🟢 **Auto-cohérence `opencode.jsonc`** : le fichier se signale lui-même deux
