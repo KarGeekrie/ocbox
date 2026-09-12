@@ -129,3 +129,17 @@ def test_known_settings_do_not_warn(tmp_path: Path, capsys) -> None:
     conf.write_text("import os\nBASE_OS = 'ubuntu'\nPIDS_LIMIT = 256\n")
     load_config(explicit_path=conf)
     assert "unrecognised" not in capsys.readouterr().err
+
+
+def test_type_checking_import_does_not_warn(tmp_path: Path, capsys) -> None:
+    """`from typing import TYPE_CHECKING` is a standard type-only-import guard,
+    not a setting - it must not be flagged as an unrecognised one."""
+    conf = tmp_path / "conf.py"
+    conf.write_text(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from pathlib import Path\n"
+        "BASE_OS = 'ubuntu'\n"
+    )
+    load_config(explicit_path=conf)
+    assert "TYPE_CHECKING" not in capsys.readouterr().err

@@ -36,6 +36,13 @@ KNOWN_SETTINGS = frozenset(
     }
 )
 
+# ALL-CAPS names that legitimately show up in a conf.py without being a
+# setting - so the unknown-setting warning below doesn't fire on them.
+# TYPE_CHECKING is the common case: `from typing import TYPE_CHECKING` is a
+# standard way to guard type-only imports, and would otherwise be flagged as
+# an unrecognised setting on every conf.py that uses it.
+NOT_A_SETTING = frozenset({"TYPE_CHECKING"})
+
 
 def _string_list(value: object, name: str, path: Path | None) -> list[str]:
     """Coerces a list/tuple of package names, rejecting a bare string.
@@ -97,6 +104,7 @@ def _apply_overrides(
         and not name.startswith("_")
         and name not in KNOWN_SETTINGS
         and name not in MOVED_TO_OPENCODE_JSONC
+        and name not in NOT_A_SETTING
     )
     if unknown:
         print(
