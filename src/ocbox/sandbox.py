@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -58,6 +59,30 @@ EXTRA_MOUNTS_ROOT = "/mnt"
 # the sandbox AGENTS.md describes the network from this same value, so the agent
 # is told what the container actually gets rather than what someone remembered.
 SANDBOX_NETWORK = "none"
+
+# The loopback port the LLM-egress relay binds *inside* the container. Fixed
+# rather than configurable: OpenCode reaches it as http://127.0.0.1:<port>, and
+# entrypoint.sh binds it. It must differ from the container web port (see run()).
+CONTAINER_LLM_PORT = 8081
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Writes `text` to `path` at mode 0600, never following a symlink at that
+    path.
+
+    The generated per-run files live in the run directory the container shares
+    read-write at the same uid (--userns=keep-id), so a compromised sandbox
+    could plant a symlink there to redirect a write onto a host file. Unlinking
+    first and opening with O_NOFOLLOW|O_EXCL closes that off - same reasoning as
+    auth.write_env_file.
+    """
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, text.encode())
+    finally:
+        os.close(fd)
 
 
 @dataclass
@@ -201,7 +226,9 @@ def daemonize(log_path: Path) -> int:
     devnull_fd = os.open(os.devnull, os.O_RDONLY)
     os.dup2(devnull_fd, 0)
     os.close(devnull_fd)
-    log_fd = os.open(str(log_path), os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+    log_fd = os.open(
+        str(log_path), os.O_CREAT | os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, 0o600
+    )
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)
     os.close(log_fd)
@@ -241,9 +268,10 @@ def check_opencode_args(args: list[str], mode: str = "tui") -> None:
         flag = arg.split("=", 1)[0]
         if flag in RESERVED_OPENCODE_FLAGS:
             raise OpencodeArgsError(
-                f"{flag} is set by ocbox and can't be forwarded - it would detach "
-                "OpenCode from the relay that exposes it. Use --web-port to choose "
-                "the port you connect to on the host."
+                f"{flag} can't be forwarded - ocbox controls how OpenCode binds "
+                "so it stays wired to the relay (in web mode ocbox sets these to "
+                "point OpenCode at it). Use --web-port to choose the host port you "
+                "connect to."
             )
 
 
@@ -413,6 +441,16 @@ def run(
     if detach and mode != "web":
         raise ValueError("detach only applies to mode='web' - there's nothing to attach it to")
 
+    # The LLM relay and OpenCode's web server both bind loopback inside the
+    # container; equal ports would make one fail to bind. The LLM port is fixed,
+    # the web port is configurable, so guard against a conf.py that collides.
+    if mode == "web" and cfg.container_web_port == CONTAINER_LLM_PORT:
+        raise ConfigError(
+            f"CONTAINER_WEB_PORT ({cfg.container_web_port}) collides with the "
+            f"container's LLM relay port ({CONTAINER_LLM_PORT}); pick a different "
+            "CONTAINER_WEB_PORT in conf.py."
+        )
+
     # Before any image work: fail fast if opencode.jsonc doesn't name a usable LLM.
     llm = llm_endpoint(user_config or (image.repo_config_dir() / "opencode.jsonc"))
 
@@ -454,7 +492,7 @@ def run(
         env_file = run_dir / "env"
         auth.write_env_file(env_file, token)
 
-    container_llm_port = 8081
+    container_llm_port = CONTAINER_LLM_PORT
     relay_url = f"http://127.0.0.1:{container_llm_port}{llm.path}"
     container_web_port = cfg.container_web_port
     resolved_agents_dir = agents_dir or (image.repo_config_dir() / "agents")
@@ -470,14 +508,13 @@ def run(
         global_agents_md.unlink(missing_ok=True)
         resolved_global_agents_md = None
     else:
-        global_agents_md.write_text(agents_md_text)
+        _write_private(global_agents_md, agents_md_text)
         resolved_global_agents_md = global_agents_md
 
     opencode_config_path = run_dir / "opencode.json"
-    opencode_config_path.write_text(
-        json.dumps(
-            _generate_opencode_config(relay_url, list(extra_mounts or [])), indent=2
-        )
+    _write_private(
+        opencode_config_path,
+        json.dumps(_generate_opencode_config(relay_url, list(extra_mounts or [])), indent=2),
     )
 
     container_name = f"ocbox-{slug}"

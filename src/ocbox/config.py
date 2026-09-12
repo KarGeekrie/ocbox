@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import types
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,45 @@ PROJECT_CONFIG_NAME = "ocbox.conf.py"
 # place that address is written - so these are rejected rather than silently
 # ignored, which would leave someone editing a value that does nothing.
 MOVED_TO_OPENCODE_JSONC = ("LLM_HOST", "LLM_PORT")
+
+# Every setting ocbox reads from a conf.py. Used to warn about an ALL-CAPS name
+# that is neither one of these nor a moved key - a typo like MEMORY_LIMITS would
+# otherwise be ignored in silence, leaving someone editing a value that does
+# nothing.
+KNOWN_SETTINGS = frozenset(
+    {
+        "BASE_OS",
+        "BASE_IMAGE",
+        "CONTAINER_WEB_PORT",
+        "HOST_WEB_PORT",
+        "EXTRA_APT_DEFAULT",
+        "EXTRA_UV_DEFAULT",
+        "MEMORY_LIMIT",
+        "PIDS_LIMIT",
+    }
+)
+
+# ALL-CAPS names that legitimately show up in a conf.py without being a
+# setting - so the unknown-setting warning below doesn't fire on them.
+# TYPE_CHECKING is the common case: `from typing import TYPE_CHECKING` is a
+# standard way to guard type-only imports, and would otherwise be flagged as
+# an unrecognised setting on every conf.py that uses it.
+NOT_A_SETTING = frozenset({"TYPE_CHECKING"})
+
+
+def _string_list(value: object, name: str, path: Path | None) -> list[str]:
+    """Coerces a list/tuple of package names, rejecting a bare string.
+
+    `list("git")` silently yields `['g', 'i', 't']`, so a `conf.py` that writes
+    EXTRA_APT_DEFAULT = "git" (instead of ["git"]) would install three bogus
+    packages. Catch that here rather than at image-build time.
+    """
+    if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        raise ConfigError(
+            f"{path or 'conf.py'} sets {name} to {value!r}; it must be a list of "
+            f'package-name strings, e.g. {name} = ["git"].'
+        )
+    return [str(item) for item in value]
 
 
 class ConfigError(Exception):
@@ -57,6 +97,22 @@ def _apply_overrides(
             "reads: the LLM's address now comes from provider.local.options.baseURL "
             "in opencode-config/opencode.jsonc. Remove them from this file."
         )
+    unknown = sorted(
+        name
+        for name in vars(module)
+        if name.isupper()
+        and not name.startswith("_")
+        and name not in KNOWN_SETTINGS
+        and name not in MOVED_TO_OPENCODE_JSONC
+        and name not in NOT_A_SETTING
+    )
+    if unknown:
+        print(
+            f"ocbox: warning: {path or 'conf.py'} sets unrecognised setting(s) "
+            f"{', '.join(unknown)} - ignored (did you mean one of "
+            f"{', '.join(sorted(KNOWN_SETTINGS))}?)",
+            file=sys.stderr,
+        )
     if hasattr(module, "BASE_OS"):
         base_os = str(module.BASE_OS)
         if base_os not in DISTROS:
@@ -72,9 +128,9 @@ def _apply_overrides(
     if hasattr(module, "HOST_WEB_PORT"):
         cfg.host_web_port = module.HOST_WEB_PORT
     if hasattr(module, "EXTRA_APT_DEFAULT"):
-        cfg.extra_apt_default = list(module.EXTRA_APT_DEFAULT)
+        cfg.extra_apt_default = _string_list(module.EXTRA_APT_DEFAULT, "EXTRA_APT_DEFAULT", path)
     if hasattr(module, "EXTRA_UV_DEFAULT"):
-        cfg.extra_uv_default = list(module.EXTRA_UV_DEFAULT)
+        cfg.extra_uv_default = _string_list(module.EXTRA_UV_DEFAULT, "EXTRA_UV_DEFAULT", path)
     if hasattr(module, "MEMORY_LIMIT"):
         cfg.memory_limit = module.MEMORY_LIMIT
     if hasattr(module, "PIDS_LIMIT"):
