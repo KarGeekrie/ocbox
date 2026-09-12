@@ -33,8 +33,28 @@
   "experimental": {
     "openTelemetry": false
   },
+  // NOTE: "reserved" is INERT with the models declared below, and raising it
+  // changes nothing. Checked against opencode's session/overflow.ts:
+  //
+  //   reserved = cfg.compaction.reserved ?? min(20000, maxOutputTokens(model))
+  //   usable   = model.limit.input ? model.limit.input - reserved
+  //                                : context - maxOutputTokens(model)
+  //   auto-compaction fires when the session's token count >= usable
+  //
+  // "reserved" is only read on the first branch, which needs the model to
+  // declare limit.input. Ours declare context + output only (limit.input is
+  // optional in the schema and is not filled in for a custom provider), so the
+  // second branch applies and the threshold is context - min(output, 32000):
+  // 200000 - 32000 = 168000 tokens for every model below.
+  //
+  // To actually control it, declare "input" in a model's "limit" - then
+  // reserved applies and should be at least opencode's own default of 20000,
+  // since the compaction pass itself has to fit in what's left.
   "compaction": {
     "auto": true,
+    // Old tool outputs are kept rather than pruned: a review that read twenty
+    // files should still be able to quote them. Flip to true if sessions hit
+    // the threshold above too fast.
     "prune": false,
     "reserved": 10000
   },
@@ -55,6 +75,12 @@
         // README's TODO.
         "baseURL": "http://127.0.0.1:11434/v1"
       },
+      // On "limit": opencode clamps a model's output to OUTPUT_TOKEN_MAX
+      // (32000, unless OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX says otherwise),
+      // so declaring 131072 below does not buy a longer answer - and since the
+      // auto-compaction threshold is context - min(output, 32000), every model
+      // here compacts at 168000 tokens. Add "input" to a "limit" block if you
+      // want compaction.reserved to have any effect (see the note above it).
       "models": {
         "Qwen3.8-27B-smart": {
           "name": "Qwen3.8-27B-smart",

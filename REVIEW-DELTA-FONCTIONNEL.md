@@ -478,6 +478,58 @@ devoir écrire `**` pour atteindre un sous-dossier.
 **✅ Correctif appliqué** — commentaire réécrit d'après l'implémentation, en
 précisant les deux règles et la casse particulière du `" *"` final.
 
+### 🟠 15 — `compaction.reserved` ne fait rien (réglage silencieusement inerte)
+**`opencode-config/opencode.jsonc` (`compaction`)**
+
+Question posée : « `reserved: 10000`, c'est assez grand ? ». La réponse est que
+la valeur **n'est jamais lue** avec les modèles déclarés. Lecture de
+`packages/opencode/src/session/overflow.ts` :
+
+```ts
+const COMPACTION_BUFFER = 20_000
+const reserved = cfg.compaction?.reserved ?? Math.min(COMPACTION_BUFFER, maxOutputTokens(model))
+return model.limit.input
+  ? Math.max(0, model.limit.input - reserved)        // seule branche lisant `reserved`
+  : Math.max(0, context - maxOutputTokens(model))    // branche empruntée ici
+// isOverflow : tokens_session >= usable  ->  compaction auto
+```
+avec, dans `provider/transform.ts` :
+```ts
+export const OUTPUT_TOKEN_MAX = 32_000
+maxOutputTokens = Math.min(model.limit.output, outputTokenMax) || outputTokenMax
+```
+
+Nos cinq modèles déclarent `context` et `output`, **jamais `limit.input`** —
+optionnel au schéma (`required: ["context", "output"]`) et non rempli
+automatiquement pour un provider custom (`provider.ts` : `input: model.limit?.input
+?? existingModel?.limit?.input`, donc `undefined`). La branche `else` s'applique :
+
+| Modèle | `output` déclaré | `min(output, 32000)` | Seuil d'auto-compaction |
+|---|---|---|---|
+| Qwen3.8-27B-smart / -medium | 131072 | 32000 | **168 000** tokens |
+| smart-glm, Qwen3.6-35B-fast, -fast-think | 81920 | 32000 | **168 000** tokens |
+
+Le seuil est donc identique partout, et indépendant de `reserved` : 10000, 0 ou
+200000 donnent le même résultat. Deux conséquences secondaires :
+- déclarer `output: 131072` n'achète pas de réponse plus longue — opencode
+  plafonne à `OUTPUT_TOKEN_MAX = 32000` sauf variable d'environnement ;
+- si un jour `limit.input` est déclaré, `reserved: 10000` devient actif **et
+  moins prudent que le défaut d'opencode** (`min(20000, maxOutputTokens)` =
+  20000), alors que la passe de compaction doit elle-même tenir dans ce qui
+  reste.
+
+C'est le cas d'école que l'`AGENTS.md` du dépôt met en garde côté OpenCode : un
+réglage qui a l'air configuré et ne fait rien. Ici il n'est même pas rejeté,
+puisque la clé est valide — elle n'est simplement jamais atteinte.
+
+**✅ Correctif appliqué** — `auto`/`prune` sont conservés tels quels (ils, eux,
+agissent) ; la formule réelle, le seuil de 168000 et la condition
+`limit.input` sont documentés en commentaire au-dessus du bloc, plus une note
+sur le plafond de 32000 au-dessus de `models`. Aucun changement de
+comportement : le choix d'activer réellement `reserved` (déclarer `limit.input`)
+est une décision d'équipe sur les vraies capacités des modèles, pas une valeur
+que je peux inventer.
+
 ### Points mineurs constatés, non corrigés (volontairement)
 
 - `skills/code-review/agents/fix-applicator.md` n'est **pas** un agent OpenCode
