@@ -23,7 +23,11 @@ the prompt.
 ## What's here, and what isn't
 
 This directory holds the team's additional agents: `chat`, for talking through
-code without changing it, and `review`, for finding bugs in a change.
+code without changing it, and `review`, for finding bugs in a change. `review`
+is read-only by design (see below) and reaches for the `code-review`/
+`sota-review` skills in `../skills/` for anything beyond a small diff;
+applying the fixes those skills can propose needs `build` instead, since
+`review` can't edit.
 
 `build` and `plan` are deliberately **not** here. They are OpenCode's own
 built-in primary agents, used exactly as OpenCode ships them. A `build.md` or
