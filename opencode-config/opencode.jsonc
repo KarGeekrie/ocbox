@@ -118,33 +118,195 @@
     "cohere", "fireworks", "groq", "mistral", "perplexity",
     "together", "xai", "deepseek", "huggingface", "opencode"
   ],
+  // permission.bash/read/edit below are a mechanical backstop for the rules in
+  // AGENTS.md and environments/*.md: those explain intent to the model, this
+  // enforces it regardless of whether the model read, understood, or drifted
+  // from them. Written once for every mode - see the comments on each block
+  // for why a rule that's redundant in the sandbox (no sudo, no network, an
+  // ephemeral filesystem) is still worth keeping there: it's inert, not wrong,
+  // and it's the only thing standing between the model and the real host in
+  // --no-sandbox.
+  //
+  // PATTERN MATCHING: * matches zero or more characters, ? matches exactly
+  // one. The LAST matching rule wins - broad rules go first, specific ones
+  // after. Reordering a block changes its meaning.
   "permission": {
+    // external_directory stays deny-by-default on purpose (see
+    // _generate_opencode_config() in sandbox.py): a mounted --mount directory
+    // or a skill's own reference files get an explicit "allow" entry - the
+    // two below for the skills shipped in skills/, one per path generated
+    // automatically per --mount. Nothing here is meant to relax that default;
+    // in --no-sandbox it's the only thing standing between the model and the
+    // rest of the host filesystem, so keep it strict rather than "ask".
     "external_directory": {
       "*": "deny",
       "~/.config/opencode/skills/code-review/*": "allow",
       "~/.config/opencode/skills/sota-review/*": "allow"
     },
-    "doom_loop": "deny"
+    "doom_loop": "deny",
 
-    // Lecture seule dans le working directory
-    //"read": "allow",
-    // Interdire toute modification de fichiers
-    //"edit": "deny",
-    // Autoriser uniquement les commandes git
-    //"bash": {
-    //  "*": "deny",
-    //  "git *": "allow"
-    //},
-    // Autoriser la recherche dans le code (utile pour la lecture)
-    //"grep": "allow",
-    // Autoriser le glob pour lister les fichiers
-    //"glob": "allow",
-    // Interdire l'accès aux répertoires externes
-    // Interdire la navigation web
-    // "webfetch": "deny",
-    // Interdire la recherche web
-    // "websearch": "deny"
-    // Interdire les questions utilisateur (optionnel)
-    //"question": "deny"
+    // Secrets and other people's credentials. No blanket "~/**": "deny" -
+    // the workspace often lives under $HOME, and that would deny the project
+    // itself. In the sandbox these host paths mostly don't resolve to
+    // anything (nothing outside the project is mounted), so this mainly
+    // guards a .env file that lives inside the project itself; on the host
+    // it's the real thing.
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow",
+      "~/.ssh/**": "deny",
+      "~/.gnupg/**": "deny",
+      "~/.aws/**": "deny",
+      "~/.kube/**": "deny",
+      "~/.netrc": "deny",
+      "~/.docker/config.json": "deny"
+    },
+
+    // User-level config is never editable, approved or not - same caveat:
+    // deny specific paths, never all of ~.
+    "edit": {
+      "*": "allow",
+      "~/.config/**": "deny",
+      "~/.ssh/**": "deny",
+      "~/.gnupg/**": "deny",
+      "~/.gitconfig": "deny",
+      "~/.bashrc": "deny",
+      "~/.zshrc": "deny",
+      "~/.profile": "deny",
+      "~/.bash_profile": "deny"
+    },
+
+    "bash": {
+      "*": "allow",
+
+      // Privilege escalation and system package managers. The sandbox has no
+      // sudo and no apt/dnf on PATH for the running agent (extra packages are
+      // layered at image-build time, before the sandbox starts) - these
+      // patterns just never match there. On the host they're the main guard.
+      "sudo *": "deny",
+      "su *": "deny",
+      "doas *": "deny",
+      "apt *": "deny",
+      "apt-get *": "deny",
+      "dnf *": "deny",
+      "yum *": "deny",
+      "zypper *": "deny",
+      "pacman *": "deny",
+      "brew *": "deny",
+      "conda *": "deny",
+      "mamba *": "deny",
+
+      // Installers that write outside the workspace by design.
+      "pipx *": "deny",
+      "pip install --user *": "deny",
+      "cargo install *": "deny",
+      "go install *": "deny",
+      "npm i -g *": "deny",
+      "npm install -g *": "deny",
+      "npm install --global *": "deny",
+
+      // Changing the dependency set. The sandbox has no network beyond the
+      // LLM relay, so these would fail regardless of this permission; on the
+      // host they're a real install and need a check-in first.
+      "pip install *": "ask",
+      "pip uninstall *": "ask",
+      "uv add *": "ask",
+      "uv remove *": "ask",
+      "uv pip install *": "ask",
+      "npm i *": "ask",
+      "npm install *": "ask",
+      "npm uninstall *": "ask",
+      "cargo add *": "ask",
+      "cargo remove *": "ask",
+
+      // Materializing what's ALREADY declared stays free. These come after
+      // the "ask" rules on purpose: last match wins, so
+      // `pip install -r requirements.txt` resolves to allow, while a bare
+      // `pip install requests` stays gated. Do not move them up.
+      "uv sync*": "allow",
+      "uv lock --check*": "allow",
+      "pip install -r *": "allow",
+      "pip install --require-hashes *": "allow",
+      "pip install -e .*": "allow",
+      "npm ci*": "allow",
+      "go mod download*": "allow",
+      "go mod verify*": "allow",
+      "cargo build*": "allow",
+      "cargo fetch*": "allow",
+      "cargo test*": "allow",
+
+      // Downloads landing on disk. curl/wget cannot be split by pattern into
+      // "read a page" vs "save a file", so both ask.
+      "curl *": "ask",
+      "wget *": "ask",
+      "git clone *": "ask",
+
+      // Leaving the machine or rewriting history. Plain `git commit` is
+      // intentionally absent: local and recoverable. The mounted workspace is
+      // real in every mode, so this matters in the sandbox too, not just
+      // --no-sandbox.
+      "git push*": "ask",
+      "git reset --hard*": "ask",
+      "git clean *": "ask",
+      "git rebase *": "ask",
+      "git commit --amend*": "ask",
+      "git filter-branch*": "deny",
+      "npm publish*": "ask",
+      "cargo publish*": "ask",
+      "twine upload*": "ask",
+
+      // Shared allocation - job schedulers, typically only reachable/present
+      // on the host.
+      "sbatch *": "ask",
+      "srun *": "ask",
+      "salloc *": "ask",
+      "qsub *": "ask",
+      "bsub *": "ask",
+
+      // Capability queries are pre-approved: they report what the machine
+      // offers and expose nobody's data. Without these, external_directory's
+      // deny-by-default would still block nothing here (these are bash, not
+      // filesystem reads), but they'd otherwise fall through to the "ask"
+      // default above on every call.
+      "module *": "allow",
+      "pkg-config *": "allow",
+      "ldconfig *": "allow",
+      "nproc*": "allow",
+      "lscpu*": "allow",
+      "nvidia-smi*": "allow",
+
+      // Catastrophic-deletion guards. Ordinary `rm -rf build/` stays free;
+      // these only stop the targets that are never recoverable.
+      "rm -rf /": "deny",
+      "rm -rf /*": "deny",
+      "rm -rf ~*": "deny",
+      "rm -rf $HOME*": "deny"
+    }
+  },
+
+  // Plan agent: read and reason, never touch the filesystem. This restricts
+  // the built-in `plan` agent's *permissions* only - it does not redefine its
+  // prompt, so it doesn't run into the reason agents/build.md and
+  // agents/plan.md don't exist in this repo (see agents/README.md): a prompt
+  // override risks telling the agent it's sandboxed even when it isn't, but a
+  // permission override carries no such claim.
+  "agent": {
+    "plan": {
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "ask",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "ls *": "allow",
+          "cat *": "allow",
+          "module avail*": "allow",
+          "module spider*": "allow"
+        }
+      }
+    }
   }
 }

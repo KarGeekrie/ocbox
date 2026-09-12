@@ -487,6 +487,16 @@ own global config directory - rather than through any config key, so the
 - **Team rules and environments**: `AGENTS.md` and `environments/`, which ocbox
   composes into the global `AGENTS.md` for each run - see "Workflow" step 1.
 
+Two skills ship by default: `code-review` (checklist-driven Python/C++/Fortran
+review - correctness, design, HPC performance, pybind11 bindings, test and
+doc gaps - with several scope modes: full project, a single file, a commit or
+branch, a GitLab MR, or a Tuleap PR) and `sota-review` (checks whether an
+implemented numerical method matches the current state of the art; runs
+standalone or as a follow-up on a `code-review` finding tagged
+`[SOTA-CHECK]`). Both are read-only findings-only unless the agent running
+them can edit - see `opencode-config/skills/code-review/README.md` for how
+that split works with `review` vs `build`.
+
 ocbox adds two agents next to OpenCode's built-in `build` and `plan`, which it
 leaves exactly as OpenCode ships them: `chat` (discussion only - editing *and*
 bash denied, since denying edits alone still leaves `echo x > file`) and
