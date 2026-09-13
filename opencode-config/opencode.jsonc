@@ -225,7 +225,14 @@
     "edit": {
       "*": "allow",
       "*.ssh/*": "deny",
-      "*.gnupg/*": "deny"
+      "*.gnupg/*": "deny",
+      // Skills are read, never rewritten: an edited skill would reach every
+      // later session. The sandbox mounts skills/ read-only anyway; under
+      // --no-sandbox, external_directory lets the model reach these files (see
+      // above), so this is what keeps the edit and write tools off them. A
+      // bash redirect still could - nothing in --no-sandbox is a guarantee.
+      "*/.config/opencode/skills/*": "deny",
+      "*/.ocbox/no-sandbox/opencode-config/skills/*": "deny"
     },
 
     "bash": {

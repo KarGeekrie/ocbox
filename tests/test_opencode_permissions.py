@@ -155,6 +155,22 @@ def test_credentials_are_not_editable(build) -> None:
     assert _evaluate(build, "edit", "../.ssh/authorized_keys") == "deny"
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../ocbox/.ocbox/no-sandbox/opencode-config/skills/code-review/SKILL.md",
+        "home/u/ocbox/.ocbox/no-sandbox/opencode-config/skills/sota-review/references/x.md",
+        "home/ocbox/.config/opencode/skills/code-review/SKILL.md",
+    ],
+)
+def test_skills_are_readable_but_not_editable(build, path) -> None:
+    """external_directory has to let the model reach skill files; without this
+    the global edit block would let `build` rewrite the team's skills under
+    --no-sandbox."""
+    assert _evaluate(build, "edit", path) == "deny"
+    assert _evaluate(build, "read", path) == "allow"
+
+
 def test_read_and_edit_patterns_can_match_a_worktree_relative_path(config) -> None:
     """read and edit are asked with a relative path: a "~/..." or absolute
     pattern there looks like protection and never matches anything."""
