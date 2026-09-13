@@ -756,6 +756,13 @@ images, untagged behind it. They pile up over time; reclaim the space with
 `podman image prune` (or `podman system prune`) when convenient - ocbox never
 deletes images itself.
 
+Project slugs are now normalised: lowercase, with spaces and other characters
+folded to `-`. A project whose directory name has capitals or such characters
+therefore gets a new slug once, after updating past that change. Its previous
+home volume, where OpenCode keeps that project's sessions, and its images stay
+behind under the old name. `podman volume ls --filter name=ocbox-home-` lists
+the volumes, and `podman volume rm` removes one you no longer need.
+
 ## Development
 
 ```sh

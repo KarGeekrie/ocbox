@@ -266,6 +266,28 @@ opencode 1.18.29 and its published schema:
   entry after the team's, not instead of them. Then end to end on this code:
   `read`, `write`, `ls` and a `bash` call with `workdir` all worked on
   `/mnt/extra`, while `/etc/hostname` stayed refused.
+- **Permission rules are last-match in written order, and read/edit paths are
+  worktree-relative** (opencode 1.18.30's bundled code, plus the rules
+  `opencode debug agent <name>` resolves):
+  - `Permission.evaluate` is `rulesets.flat().findLast(...)` over OpenCode's
+    defaults, then the config, then agent-level rules. Nothing sorts by
+    pattern length.
+  - The read and edit tools ask with `path.relative(worktree, file)`, so a
+    `~/...` pattern in those blocks never matched.
+  - `Tool.assertExternalDirectory` asks with the absolute parent directory
+    plus `/*`, without resolving symlinks.
+
+  Two consequences found this way:
+  - The global `edit: {"*": "allow"}` lifted the built-in `plan` agent's edit
+    restriction, since config rules come after an agent's built-ins. The bare
+    `edit: "deny"` added to restore it also denied plan's own plan file. Both
+    are gone: the config sets no `edit` rule matching everything, and `plan` is
+    left exactly as OpenCode ships it.
+  - OpenCode's own allow rules for loaded skills sit among its defaults, where
+    the team's `"*": "deny"` overrides them.
+
+  `tests/test_opencode_permissions.py` replays the evaluation on
+  `opencode.jsonc`.
 - **Open: `opencode run` on the host can stall right after `init`**, before
   the session is created. No request reaches the LLM, and the process sits idle:
   no CPU over 5 s, every thread waiting in `epoll_wait` or on a futex, no TCP

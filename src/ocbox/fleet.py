@@ -41,12 +41,25 @@ def _connect_url(slug: str) -> str | None:
     once sandbox.run() knows the host port (not knowable at container-creation
     time, so it isn't a label - see sandbox.py). None for tui mode, or a
     sandbox whose run_dir predates this file."""
-    connect_file = project.runtime_dir_path(slug) / "connect.json"
+    port = _read_host_web_port(project.runtime_dir_path(slug))
+    return auth.build_web_url(port) if port is not None else None
+
+
+def _read_host_web_port(run_dir: Path) -> int | None:
+    """The host web port recorded in `run_dir`'s connect.json, or None.
+
+    The run directory is bind-mounted read-write into the sandbox, so what it
+    holds is only as trustworthy as the sandbox. Anything but a real TCP port
+    is refused: `"1@evil.example"` would otherwise be printed as
+    `http://127.0.0.1:1@evil.example`, a link to another host.
+    """
     try:
-        data = json.loads(connect_file.read_text())
-        return auth.build_web_url(data["host_web_port"])
-    except (OSError, json.JSONDecodeError, KeyError):
+        port = json.loads((run_dir / "connect.json").read_text())["host_web_port"]
+    except (OSError, ValueError, KeyError, TypeError):
         return None
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        return None
+    return port
 
 
 def list_running(podman: PodmanClient) -> list[SandboxInfo]:
@@ -113,18 +126,20 @@ def attach_sandbox(podman: PodmanClient, target: str) -> int:
     slug = name.removeprefix("ocbox-")
     # Path only: attaching reads a run directory someone else owns and created.
     run_dir = project.runtime_dir_path(slug)
+    port = _read_host_web_port(run_dir)
     try:
-        connect = json.loads((run_dir / "connect.json").read_text())
         creds = auth.read_env_file(run_dir / "env")
-        url = auth.build_web_url(connect["host_web_port"])
         username = creds["OPENCODE_SERVER_USERNAME"]
         password = creds["OPENCODE_SERVER_PASSWORD"]
-    except (OSError, json.JSONDecodeError, KeyError):
+    except (OSError, KeyError):
+        port = None
+    if port is None:
         print(
             f"ocbox: {name} is running but its connection info isn't available "
             "(tui mode, or it predates this ocbox version)"
         )
         return 1
+    url = auth.build_web_url(port)
     print(auth.format_connect_banner(url, username, password))
     return 0
 

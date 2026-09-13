@@ -153,77 +153,89 @@
   // and it's the only thing standing between the model and the real host in
   // --no-sandbox.
   //
-  // PATTERN MATCHING, as implemented in opencode's util/wildcard.ts (read at
-  // 1.18.x, not guessed): a pattern becomes a regex anchored at both ends
-  // where * -> .* and ? -> . , compiled with the dotAll flag. Two consequences
-  // worth knowing before editing a block:
-  //   - * CROSSES "/" freely. "<dir>/*" therefore also covers
-  //     "<dir>/sub/file.md", and ** is not a distinct, more-recursive form.
-  //   - Rules are sorted by pattern LENGTH (shortest first) and the last match
-  //     wins, so the most SPECIFIC (longest) pattern wins wherever it sits.
-  //     The order rules are written in does NOT change their meaning; a rule
-  //     only loses to a strictly longer pattern that also matches.
-  // ("ls *" and friends get one extra rule: a trailing " *" is made optional,
-  // so "ls *" matches a bare "ls" too.)
+  // PATTERN MATCHING, as implemented in opencode 1.18.30 (read in its bundled
+  // code, not guessed; tests/test_opencode_permissions.py replays it):
+  //   - A pattern becomes a regex anchored at both ends where * -> .* and
+  //     ? -> . , with the dotAll flag. * CROSSES "/" freely: "<dir>/*" also
+  //     covers "<dir>/sub/file.md", and ** is no more recursive than *.
+  //     ("ls *" and friends get one extra rule: a trailing " *" is optional,
+  //     so "ls *" matches a bare "ls" too.)
+  //   - The LAST matching rule wins, in the order rules are written:
+  //     Permission.evaluate is findLast over OpenCode's own defaults, then
+  //     this file, then agent-level rules. Nothing sorts by pattern length -
+  //     Wildcard.all() does, but permissions don't go through it. So a
+  //     general rule goes first and its exceptions after it, and REORDERING
+  //     A BLOCK CHANGES WHAT IT MEANS.
+  //   - read and edit are asked with the path RELATIVE to the project's
+  //     worktree ("src/app.py", "../.ssh/id_rsa"), so a "~/..." or absolute
+  //     pattern can never match there. external_directory is asked with the
+  //     absolute parent directory plus "/*", links not resolved, and that is
+  //     where anything outside the project is decided.
   "permission": {
-    // external_directory stays deny-by-default on purpose (see
-    // _generate_opencode_config() in sandbox.py): a mounted --mount directory
-    // or a skill's own reference files get an explicit "allow" entry - the
-    // two below for the skills shipped in skills/, one per path generated
-    // automatically per --mount. Nothing here is meant to relax that default;
-    // in --no-sandbox it's the only thing standing between the model and the
-    // rest of the host filesystem, so keep it strict rather than "ask".
+    // external_directory stays deny-by-default on purpose: in --no-sandbox
+    // it's what stands between the model and the rest of the host filesystem,
+    // so keep it strict rather than "ask". Exceptions come after "*" (last
+    // match wins): each --mount directory gets one, generated per run by
+    // _generate_opencode_config() in sandbox.py, and the entries below cover
+    // skills and OpenCode's own plans.
     "external_directory": {
       "*": "deny",
-      // Sandboxed modes: skills/ is bind-mounted at OpenCode's global skills
-      // path, so this is where a skill's own SKILL.md, references/ and
-      // agents/ files live. Verified in a real container: these three land as
-      // "allow" while /etc/hostname stays denied.
-      "~/.config/opencode/skills/code-review/*": "allow",
-      "~/.config/opencode/skills/sota-review/*": "allow",
-      // --no-sandbox: the very same skills are reached through the config
-      // directory ocbox assembles inside the checkout
-      // (.ocbox/no-sandbox/opencode-config/skills/...), which is NOT under
-      // ~/.config/opencode - verified with `opencode debug skill`, which
-      // reports that path. Without these two entries the skills load but every
-      // references/*.md they try to read is denied by "*" above. The leading *
-      // covers wherever the checkout happens to live.
-      "*/opencode-config/skills/code-review/*": "allow",
-      "*/opencode-config/skills/sota-review/*": "allow"
+      // Skills' own files (SKILL.md, references/, agents/) - every skill at
+      // once, since * crosses "/". OpenCode does add allow rules for the
+      // skills it loads, but among its defaults, where the "*" above
+      // overrides them.
+      // Sandboxed modes: skills/ is bind-mounted, read-only, at OpenCode's
+      // global skills path.
+      "~/.config/opencode/skills/*": "allow",
+      // --no-sandbox: the config directory ocbox assembles in the checkout.
+      // OpenCode reaches skills through its symlink and checks that path as
+      // given - its own skill rules use exactly this path. Anchoring on
+      // .ocbox/no-sandbox keeps out any "<anywhere>/opencode-config/skills/",
+      // which the earlier "*/opencode-config/skills/<name>/*" let in.
+      "*/.ocbox/no-sandbox/opencode-config/skills/*": "allow",
+      // Where the plan agent may keep its plans. OpenCode allows it among its
+      // defaults, which the "*" above overrides.
+      "~/.local/share/opencode/plans/*": "allow"
     },
     "doom_loop": "deny",
 
-    // Secrets and other people's credentials. No blanket "~/**": "deny" -
-    // the workspace often lives under $HOME, and that would deny the project
-    // itself. In the sandbox these host paths mostly don't resolve to
-    // anything (nothing outside the project is mounted), so this mainly
-    // guards a .env file that lives inside the project itself; on the host
-    // it's the real thing.
+    // Secrets and credentials, as a second line behind external_directory.
+    // Patterns here match the worktree-relative path, so they start with *
+    // rather than ~/: "*.ssh/*" matches ".ssh/id_rsa", "../.ssh/id_rsa" and
+    // "home/u/.ssh/id_rsa" alike. In the sandbox the host's own files aren't
+    // mounted, so this mainly guards secrets inside the project.
     "read": {
       "*": "allow",
       "*.env": "deny",
       "*.env.*": "deny",
       "*.env.example": "allow",
-      "~/.ssh/**": "deny",
-      "~/.gnupg/**": "deny",
-      "~/.aws/**": "deny",
-      "~/.kube/**": "deny",
-      "~/.netrc": "deny",
-      "~/.docker/config.json": "deny"
+      "*.ssh/*": "deny",
+      "*.gnupg/*": "deny",
+      "*.aws/*": "deny",
+      "*.kube/*": "deny",
+      "*.netrc": "deny",
+      "*.docker/config.json": "deny"
     },
 
-    // User-level config is never editable, approved or not - same caveat:
-    // deny specific paths, never all of ~.
+    // Credentials are never editable either. User-level config (~/.config,
+    // shell rc files, ~/.gitconfig) lies outside every project, where
+    // external_directory's "*": "deny" already refuses it. An entry here
+    // couldn't target it anyway: edit patterns are worktree-relative, and a
+    // project can hold its own .config/ or .bashrc.
+    // No "*": "allow" here: OpenCode already allows edits by default, and a
+    // config rule comes after the built-in plan agent's own restriction ("*":
+    // "deny" except its plan files), so it would lift it. The built-in `plan`
+    // is left exactly as OpenCode ships it.
     "edit": {
-      "*": "allow",
-      "~/.config/**": "deny",
-      "~/.ssh/**": "deny",
-      "~/.gnupg/**": "deny",
-      "~/.gitconfig": "deny",
-      "~/.bashrc": "deny",
-      "~/.zshrc": "deny",
-      "~/.profile": "deny",
-      "~/.bash_profile": "deny"
+      "*.ssh/*": "deny",
+      "*.gnupg/*": "deny",
+      // Skills are read, never rewritten: an edited skill would reach every
+      // later session. The sandbox mounts skills/ read-only anyway; under
+      // --no-sandbox, external_directory lets the model reach these files (see
+      // above), so this is what keeps the edit and write tools off them. A
+      // bash redirect still could - nothing in --no-sandbox is a guarantee.
+      "*/.config/opencode/skills/*": "deny",
+      "*/.ocbox/no-sandbox/opencode-config/skills/*": "deny"
     },
 
     "bash": {
@@ -331,30 +343,6 @@
       "rm -rf /*": "deny",
       "rm -rf ~*": "deny",
       "rm -rf $HOME*": "deny"
-    }
-  },
-
-  // Plan agent: read and reason, never touch the filesystem. This restricts
-  // the built-in `plan` agent's *permissions* only - it does not redefine its
-  // prompt, so it doesn't run into the reason agents/build.md and
-  // agents/plan.md don't exist in this repo (see agents/README.md): a prompt
-  // override risks telling the agent it's sandboxed even when it isn't, but a
-  // permission override carries no such claim.
-  "agent": {
-    "plan": {
-      "permission": {
-        "edit": "deny",
-        "bash": {
-          "*": "ask",
-          "git status*": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "ls *": "allow",
-          "cat *": "allow",
-          "module avail*": "allow",
-          "module spider*": "allow"
-        }
-      }
     }
   }
 }

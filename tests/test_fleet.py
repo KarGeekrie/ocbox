@@ -189,3 +189,36 @@ def test_list_running_creates_no_directories(tmp_path, monkeypatch) -> None:
 
     assert infos[0].web_url is None  # no connect.json to read
     assert not (xdg / "ocbox").exists()
+
+
+# ---- connect.json is written where the sandbox can write too -----------------
+
+
+@pytest.mark.parametrize("port", ["1@evil.example", True, 0, 70000, "4096", None, [4096]])
+def test_list_running_ignores_a_host_web_port_that_isnt_a_port(tmp_path, monkeypatch, port) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    run_dir = project.runtime_dir("proj-abc")
+    (run_dir / "connect.json").write_text(json.dumps({"host_web_port": port}))
+    podman = MagicMock()
+    podman.list_containers.return_value = [
+        {"Names": ["ocbox-proj-abc"], "Labels": {"ocbox.slug": "proj-abc"}, "Status": "Up"}
+    ]
+
+    assert fleet.list_running(podman)[0].web_url is None
+
+
+def test_attach_refuses_a_forged_host_web_port(tmp_path, monkeypatch, capsys) -> None:
+    """A compromised sandbox could rewrite connect.json to make `ocbox attach`
+    print a link to another host next to the password."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    run_dir = project.runtime_dir("proj-abc")
+    (run_dir / "connect.json").write_text(json.dumps({"host_web_port": "1@evil.example"}))
+    auth.write_env_file(run_dir / "env", "s3cret-token")
+    podman = MagicMock()
+    podman.container_exists.return_value = True
+
+    assert fleet.attach_sandbox(podman, "ocbox-proj-abc") == 1
+    out = capsys.readouterr().out
+    assert "evil" not in out
+    assert "s3cret-token" not in out
+

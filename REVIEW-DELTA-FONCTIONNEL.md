@@ -478,6 +478,15 @@ devoir écrire `**` pour atteindre un sous-dossier.
 **✅ Correctif appliqué** — commentaire réécrit d'après l'implémentation, en
 précisant les deux règles et la casse particulière du `" *"` final.
 
+> **⚠️ Correction ultérieure (PR `fix/main-review-findings`)** — le point 1
+> ci-dessus était faux, et le commentaire d'origine avait raison. Les
+> permissions ne passent pas par `Wildcard.all()` : dans le code embarqué
+> d'opencode 1.18.30, `Permission.evaluate` fait `rulesets.flat().findLast(...)`
+> sur les règles dans leur ordre d'écriture (défauts d'OpenCode, puis config,
+> puis règles d'agent), sans tri par longueur. Le dernier motif qui matche
+> l'emporte, et réordonner un bloc en change le sens. Le commentaire est rétabli
+> dans ce sens, et `tests/test_opencode_permissions.py` rejoue cette évaluation.
+
 ### 🟠 15 — `compaction.reserved` ne fait rien (réglage silencieusement inerte)
 **`opencode-config/opencode.jsonc` (`compaction`)**
 
