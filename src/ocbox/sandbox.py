@@ -14,10 +14,10 @@ import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ocbox import auth, image, jsonc, network, project
+from ocbox import auth, fleet, image, jsonc, network, project
 from ocbox.config import Config, ConfigError
 from ocbox.packages import prompt_extra_packages
-from ocbox.podman_client import PodmanClient
+from ocbox.podman_client import PodmanClient, PodmanError
 from ocbox.state import ProjectState
 
 OPENCODE_CONFIG_MOUNT = "/etc/ocbox/opencode.json"
@@ -96,6 +96,7 @@ class RunPlan:
     user_config: Path
     data_volume: str
     container_name: str
+    slug: str
     container_web_port: int
     container_llm_port: int
     mode: str = "web"  # "web" or "tui"
@@ -133,6 +134,20 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "--rm",
         "--name",
         plan.container_name,
+        # Identifies this container as ocbox-managed for `ocbox list`/`stop`/
+        # `attach`/the startup warning (fleet.py) - name-prefix matching alone
+        # would risk colliding with an unrelated container someone else named
+        # `ocbox-something`. workdir/mode are known now; the host web port
+        # isn't yet (see run()'s connect.json write, after the container is
+        # already up) so it isn't a label.
+        "--label",
+        "ocbox.managed=1",
+        "--label",
+        f"ocbox.slug={plan.slug}",
+        "--label",
+        f"ocbox.mode={plan.mode}",
+        "--label",
+        f"ocbox.workdir={plan.workspace}",
         "--network",
         SANDBOX_NETWORK,
         "--userns",
@@ -421,6 +436,33 @@ def _compose_global_agents_md(environment: str, facts: list[str]) -> str | None:
     return "\n\n".join(sections) + "\n" if sections else None
 
 
+def _warn_about_other_sandboxes(podman: PodmanClient, slug: str) -> None:
+    """Non-blocking notice about other ocbox sandboxes already running, so a
+    --detach'd one doesn't get forgotten. Fails open exactly like
+    update_check's fetch failures: a podman hiccup here must never block a
+    normal run - only `ocbox list`/`stop`/`attach` themselves should surface
+    a broken podman as an error.
+    """
+    try:
+        others = fleet.list_running(podman)
+    except PodmanError:
+        return
+    same_project = [o for o in others if o.slug == slug]
+    other_projects = [o for o in others if o.slug != slug]
+    if same_project:
+        print(
+            f"ocbox: {same_project[0].container_name} is already running for this "
+            "project - starting another will collide on the container name.\n"
+            f"  attach: ocbox attach {slug}   stop: ocbox stop {slug}",
+            file=sys.stderr,
+        )
+    elif other_projects:
+        print(
+            f"ocbox: {len(other_projects)} other ocbox sandbox(es) running - see `ocbox list`",
+            file=sys.stderr,
+        )
+
+
 def run(
     cfg: Config,
     cwd: Path,
@@ -456,6 +498,7 @@ def run(
 
     podman = PodmanClient()
     slug = project.project_slug(cwd)
+    _warn_about_other_sandboxes(podman, slug)
     run_dir = project.runtime_dir(slug)
     st_dir = project.state_dir(slug)
     state = ProjectState.load(st_dir)
@@ -533,6 +576,7 @@ def run(
         skills_dir=resolved_skills_dir,
         data_volume=data_volume,
         container_name=container_name,
+        slug=slug,
         container_web_port=container_web_port,
         container_llm_port=container_llm_port,
         mode=mode,
@@ -547,9 +591,9 @@ def run(
         if child_pid:
             print(
                 f"ocbox: detached (pid {child_pid}), container {container_name}\n"
-                f"  progress/URL: tail -f {log_path}\n"
-                f"  status:       podman ps --filter name={container_name}\n"
-                f"  stop:         podman stop {container_name}"
+                f"  progress/log: tail -f {log_path}\n"
+                f"  status/URL:   ocbox list / ocbox attach {slug}\n"
+                f"  stop:         ocbox stop {slug}"
             )
             return 0
 
@@ -594,6 +638,14 @@ def run(
         web_relay = network.start_web_relay(run_dir, resolved_host_web_port)
         bridges.web_relay = web_relay
         bridges.web_sock = run_dir / "web.sock"
+
+        # The host port is only known now (the container was already launched
+        # above) - not a --label like slug/mode/workdir, which are set at
+        # creation time. `ocbox attach`/`ocbox list` read this back.
+        _write_private(
+            run_dir / "connect.json",
+            json.dumps({"host_web_port": resolved_host_web_port}),
+        )
 
         url = auth.build_web_url(resolved_host_web_port)
         print(auth.format_connect_banner(url, auth.DEFAULT_USERNAME, token))

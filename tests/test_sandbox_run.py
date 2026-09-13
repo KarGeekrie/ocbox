@@ -13,8 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ocbox import sandbox
+from ocbox import project, sandbox
 from ocbox.config import Config, ConfigError
+from ocbox.podman_client import PodmanError
 
 
 def _cfg(**overrides) -> Config:
@@ -47,6 +48,8 @@ def mocked_run_env(tmp_path, monkeypatch):
         patch("ocbox.sandbox.prompt_extra_packages", return_value=([], [])),
         patch("ocbox.sandbox.launch") as mock_launch,
     ):
+        mock_podman_cls.return_value.list_containers.return_value = []
+
         mock_image.repo_config_dir.return_value = data_dir
         mock_image.packages_fingerprint.return_value = "fp"
         mock_image.base_fingerprint.return_value = "basefp"
@@ -162,6 +165,80 @@ def test_run_web_mode_stops_container_on_wait_for_socket_failure(
 
     assert exit_code == 1
     mocked_run_env["container_proc"].terminate.assert_called_once()
+
+
+def test_run_silent_when_no_other_sandboxes(tmp_path, mocked_run_env, capsys) -> None:
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+    err = capsys.readouterr().err
+    assert "already running" not in err
+    assert "other ocbox sandbox" not in err
+
+
+def test_run_silent_when_listing_fails(tmp_path, mocked_run_env) -> None:
+    """A broken podman must never block a normal run over this informational
+    check - only `ocbox list`/`stop`/`attach` themselves should surface it."""
+    mocked_run_env["podman_cls"].return_value.list_containers.side_effect = PodmanError("boom")
+    exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+    assert exit_code == 0
+
+
+def test_run_warns_prominently_when_same_project_already_running(
+    tmp_path, mocked_run_env, capsys
+) -> None:
+    slug = project.project_slug(tmp_path)
+    mocked_run_env["podman_cls"].return_value.list_containers.return_value = [
+        {
+            "Names": [f"ocbox-{slug}"],
+            "Labels": {"ocbox.slug": slug, "ocbox.mode": "web", "ocbox.workdir": str(tmp_path)},
+            "Status": "Up 1 minute",
+        }
+    ]
+
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    err = capsys.readouterr().err
+    assert f"ocbox-{slug}" in err
+    assert "already running for this project" in err
+    assert f"ocbox stop {slug}" in err
+
+
+def test_run_warns_lightly_about_other_projects_running(
+    tmp_path, mocked_run_env, capsys
+) -> None:
+    mocked_run_env["podman_cls"].return_value.list_containers.return_value = [
+        {
+            "Names": ["ocbox-otherproj-deadbeef0000"],
+            "Labels": {
+                "ocbox.slug": "otherproj-deadbeef0000",
+                "ocbox.mode": "tui",
+                "ocbox.workdir": "/home/user/otherproj",
+            },
+            "Status": "Up 2 hours",
+        }
+    ]
+
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    err = capsys.readouterr().err
+    assert "1 other ocbox sandbox(es) running" in err
+    assert "ocbox list" in err
+    assert "already running for this project" not in err
+
+
+def test_run_writes_connect_json_with_host_web_port(tmp_path, mocked_run_env) -> None:
+    slug = project.project_slug(tmp_path)
+    mocked_run_env["network"].pick_free_port.return_value = 7777
+
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    connect_file = project.runtime_dir(slug) / "connect.json"
+    assert json.loads(connect_file.read_text()) == {"host_web_port": 7777}
+
+
+def test_run_tui_mode_writes_no_connect_json(tmp_path, mocked_run_env) -> None:
+    slug = project.project_slug(tmp_path)
+    sandbox.run(_cfg(), tmp_path, mode="tui", non_interactive=True)
+    assert not (project.runtime_dir(slug) / "connect.json").exists()
 
 
 def test_run_detach_with_tui_mode_rejected(tmp_path, mocked_run_env) -> None:

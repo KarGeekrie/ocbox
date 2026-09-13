@@ -4,9 +4,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from ocbox import image, update_check
+from ocbox import fleet, image, update_check
 from ocbox.config import ConfigError, load_config
-from ocbox.podman_client import PodmanError
+from ocbox.podman_client import PodmanClient, PodmanError
 from ocbox.preflight import PreflightError, run_preflight
 from ocbox.sandbox import (
     NoSandboxError,
@@ -68,8 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-d",
         action="store_true",
         help="Run the web sandbox in the background, surviving this terminal closing. "
-        "Web mode only. Track it with `podman ps`/`podman logs`/`podman stop` on the "
-        "printed container name.",
+        "Web mode only. Track it with `ocbox list`; stop it with `ocbox stop`.",
     )
     parser.add_argument(
         "--mount",
@@ -90,6 +89,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--tui/--detach/--web-port/--rebuild/--apt/--uv/--yes/--config/--mount, which "
         "are all sandbox-only.",
     )
+
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser(
+        "list", help="List currently-running ocbox sandboxes, across all projects."
+    )
+    stop_parser = subparsers.add_parser("stop", help="Stop a running ocbox sandbox.")
+    stop_parser.add_argument(
+        "target", help="Container name (ocbox-<slug>), bare slug, or project path (e.g. `.`)."
+    )
+    attach_parser = subparsers.add_parser(
+        "attach", help="Redisplay the connect URL/credentials for a running sandbox."
+    )
+    attach_parser.add_argument("target", help="Same forms as `ocbox stop`.")
+    exec_parser = subparsers.add_parser(
+        "exec", help="Open a shell (or run a command) inside a running sandbox."
+    )
+    exec_parser.add_argument("target", help="Same forms as `ocbox stop`.")
+    exec_parser.add_argument(
+        "cmd",
+        nargs=argparse.REMAINDER,
+        help="Command to run (default: sh). Takes everything after <target> verbatim, "
+        "so flags like -l reach the command instead of being parsed as ocbox's own.",
+    )
     return parser
 
 
@@ -107,12 +129,41 @@ def split_opencode_args(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv[:cut], argv[cut + 1 :]
 
 
+def cmd_list() -> int:
+    try:
+        sandboxes = fleet.list_running(PodmanClient())
+    except PodmanError as exc:
+        print(f"ocbox: {exc}", file=sys.stderr)
+        return 1
+    if not sandboxes:
+        print("ocbox: no sandboxes running")
+        return 0
+    rows = [("CONTAINER", "PROJECT", "MODE", "URL", "STATUS")]
+    rows += [
+        (s.container_name, s.workdir or s.slug, s.mode or "-", s.web_url or "-", s.status or "-")
+        for s in sandboxes
+    ]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    for row in rows:
+        print("  ".join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ocbox_argv, opencode_args = split_opencode_args(
         list(argv) if argv is not None else sys.argv[1:]
     )
     args = build_parser().parse_args(ocbox_argv)
     cwd = Path.cwd()
+
+    if args.command == "list":
+        return cmd_list()
+    if args.command == "stop":
+        return fleet.stop_sandbox(PodmanClient(), args.target)
+    if args.command == "attach":
+        return fleet.attach_sandbox(PodmanClient(), args.target)
+    if args.command == "exec":
+        return fleet.exec_shell(PodmanClient(), args.target, args.cmd or None)
 
     if args.detach and args.tui:
         print(

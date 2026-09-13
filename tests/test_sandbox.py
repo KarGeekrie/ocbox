@@ -27,6 +27,7 @@ def _plan(**overrides) -> RunPlan:
         "skills_dir": Path("/pkg/data/skills"),
         "data_volume": "ocbox-home-myproj",
         "container_name": "ocbox-myproj",
+        "slug": "myproj",
         "container_web_port": 4096,
         "container_llm_port": 8081,
     }
@@ -77,6 +78,18 @@ def test_argv_includes_hardening_flags() -> None:
     assert "--read-only" in argv
     assert "--userns" in argv
     assert "--init" in argv
+
+
+def test_argv_includes_ocbox_labels() -> None:
+    """fleet.py's list/stop/attach and the startup warning identify ocbox's
+    own containers by these labels - a name-prefix guess alone could collide
+    with an unrelated container someone else happened to call ocbox-*."""
+    argv = build_podman_run_argv(_plan(mode="web"))
+    labels = [argv[i + 1] for i, a in enumerate(argv) if a == "--label"]
+    assert "ocbox.managed=1" in labels
+    assert "ocbox.slug=myproj" in labels
+    assert "ocbox.mode=web" in labels
+    assert "ocbox.workdir=/home/user/myproj" in labels
 
 
 def test_argv_omits_resource_limits_when_unset() -> None:

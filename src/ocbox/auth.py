@@ -40,6 +40,19 @@ def write_env_file(path: Path, token: str, username: str = DEFAULT_USERNAME) -> 
         os.close(fd)
 
 
+def read_env_file(path: Path) -> dict[str, str]:
+    """Reads back a `KEY=VALUE` file written by write_env_file - the read-side
+    counterpart, used to redisplay a running sandbox's credentials from a
+    process that didn't generate them (`ocbox attach`)."""
+    env: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        if not line or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        env[key] = value
+    return env
+
+
 def build_web_url(host_web_port: int) -> str:
     return f"http://127.0.0.1:{host_web_port}"
 

@@ -368,16 +368,43 @@ network-isolated container and your LLM/browser) stay alive too:
 ```sh
 ocbox --detach
 # ocbox: detached (pid 12345), container ocbox-myproj-a1b2c3d4e5f6
-#   progress/URL: tail -f /run/user/1000/ocbox/myproj-.../ocbox.log
-#   status:       podman ps --filter name=ocbox-myproj-a1b2c3d4e5f6
-#   stop:         podman stop ocbox-myproj-a1b2c3d4e5f6
+#   progress/log: tail -f /run/user/1000/ocbox/myproj-.../ocbox.log
+#   status/URL:   ocbox list / ocbox attach myproj-a1b2c3d4e5f6
+#   stop:         ocbox stop myproj-a1b2c3d4e5f6
 ```
 
 Any interactive package prompt still runs before it detaches; everything
 after that - including the connect banner with the URL and password - goes
-to the printed log file instead of your terminal. There's no `ocbox --list`;
-track and stop it with `podman` directly, on the container name ocbox
-printed (always `ocbox-<project-slug>`).
+to the printed log file instead of your terminal.
+
+### Managing sandboxes
+
+Every sandbox ocbox starts (detached or not) carries `ocbox.*` labels
+identifying it - not a public config surface, just how the commands below
+find their own containers without guessing from the name alone:
+
+```sh
+ocbox list                       # every running sandbox, across all projects
+ocbox attach <target>            # reprint a running sandbox's URL/username/password
+ocbox stop <target>              # stop one
+ocbox exec <target> [cmd...]     # a shell inside it (default: sh) - for poking
+                                  # around the container, not the OpenCode session
+```
+
+`<target>` accepts a container name (`ocbox-<slug>`), the bare slug, or a
+project path (`.` for the current directory). `ocbox attach` only redisplays
+connection info - it doesn't open a shell; use `ocbox exec` for that.
+
+Starting a normal `ocbox` run also checks for other sandboxes already
+running and prints a one-line notice if it finds any, so a detached one
+doesn't get forgotten - more insistent if it's this exact project (starting
+a second one would collide on the container name anyway).
+
+Two things this doesn't cover: a sandbox started by an ocbox predating these
+labels won't show up until restarted (`podman ps` directly still works on
+it), and if a `--detach`'d ocbox process itself is killed uncleanly (not
+`ocbox stop` - that unwinds it normally), its relay processes can be left
+running with nothing tracking them down.
 
 Useful flags:
 

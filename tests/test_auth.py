@@ -26,6 +26,16 @@ def test_write_env_file_permissions_and_content(tmp_path: Path) -> None:
     assert "OPENCODE_SERVER_PASSWORD=secret-token" in content
 
 
+def test_read_env_file_round_trips_write_env_file(tmp_path: Path) -> None:
+    path = tmp_path / "env"
+    auth.write_env_file(path, "secret-token", username="opencode")
+
+    env = auth.read_env_file(path)
+
+    assert env["OPENCODE_SERVER_USERNAME"] == "opencode"
+    assert env["OPENCODE_SERVER_PASSWORD"] == "secret-token"
+
+
 def test_build_web_url() -> None:
     assert auth.build_web_url(12345) == "http://127.0.0.1:12345"
 
