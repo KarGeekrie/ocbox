@@ -772,6 +772,9 @@ RUN_PODMAN_INTEGRATION=1 pytest tests/integration   # requires real podman
 ruff check src tests
 ```
 
+CI runs the same checks, the integration suite included, on every pull
+request (`.github/workflows/ci.yml`).
+
 ## What still writes outside the checkout
 
 ocbox keeps what it writes inside this checkout where it can, in the gitignored
