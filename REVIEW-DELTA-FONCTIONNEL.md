@@ -530,6 +530,42 @@ comportement : le choix d'activer réellement `reserved` (déclarer `limit.input
 est une décision d'équipe sur les vraies capacités des modèles, pas une valeur
 que je peux inventer.
 
+### 🟠 16 — `agents/README.md` était chargé comme un agent fantôme
+**`opencode-config/agents/README.md`**
+
+Le fichier affirmait : « A file OpenCode doesn't accept is simply absent from
+the list rather than reported as an error - **this README, for instance, has no
+frontmatter and so is correctly ignored.** » C'est faux, et c'est visible dans
+la sortie réelle d'`opencode agent list` en conteneur :
+
+```
+chat (primary)
+README (all)        ← le README du dossier, chargé comme agent
+review (subagent)
+```
+
+OpenCode charge **tout** `*.md` du dossier, frontmatter ou pas. Conséquences :
+un agent nommé `README` apparaît dans la liste, sélectionnable par l'utilisateur
+et invocable comme sous-agent (`mode: all`), avec les permissions par défaut
+— c'est-à-dire **sans** les restrictions `edit: deny` que les vrais agents
+d'équipe s'imposent. Un agent non voulu, sans garde-fou, dans la liste offerte
+à l'utilisateur.
+
+**✅ Correctif appliqué** — `disable: true` en frontmatter du README, vérifié
+avant/après en conteneur réel (`README (all)` disparaît de la liste, les autres
+agents restent). La phrase fausse est remplacée par l'explication du mécanisme
+réel, et la consigne pour toute future documentation déposée dans ce dossier :
+`disable: true`, ou un nom qui ne finit pas par `.md`.
+
+### Changement demandé — `review` passe en agent primaire
+
+Sur demande de l'équipe, pour mettre la capacité de revue en avant :
+`mode: subagent` → `mode: primary` dans `agents/review.md`. Vérifié en
+conteneur (`review (primary)` dans `opencode agent list`), et sans casse :
+aucun fichier de `opencode-config/` n'invoquait `review` comme sous-agent
+(vérifié par grep). Cohérence agent/skill relue à cette occasion — voir la
+section suivante.
+
 ### Points mineurs constatés, non corrigés (volontairement)
 
 - `skills/code-review/agents/fix-applicator.md` n'est **pas** un agent OpenCode

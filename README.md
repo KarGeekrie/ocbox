@@ -519,9 +519,18 @@ naming the files involved.
 
 When you only want to **talk something through** - how a module works, which
 of two designs to choose - use `chat`: it reads the code but can neither edit
-files nor run commands, so nothing changes by accident. To find bugs in a
-change before it lands, use `review`: editing is denied, and commands run only
-with your approval.
+files nor run commands, so nothing changes by accident.
+
+**To find bugs before a change lands, switch to `review`** (Tab, like `build`
+and `plan` - it's a primary agent). It cannot edit: editing is denied and
+commands run only with your approval, so a review never quietly rewrites the
+thing it was asked to judge. For anything beyond a quick look at a small diff
+it reaches for the `code-review` skill, which brings language-specific
+checklists for Python, C++ and Fortran, HPC and pybind11 checks, and test- and
+doc-gap passes - see "Default skills & agents" below. Ask it for a whole
+project, one file, a commit, or a branch against a base branch; it will ask if
+you don't say. When you then want the fixes applied rather than reported,
+switch to `build` and ask it to run the same skill.
 
 ### 3. Turn a recurring procedure into a skill
 
@@ -593,11 +602,22 @@ them can edit - see `opencode-config/skills/code-review/README.md` for how
 that split works with `review` vs `build`.
 
 ocbox adds two agents next to OpenCode's built-in `build` and `plan`, which it
-leaves exactly as OpenCode ships them: `chat` (discussion only - editing *and*
-bash denied, since denying edits alone still leaves `echo x > file`) and
-`review` (finds bugs; editing denied, bash gated on your approval so `git diff`
-still works). Both deny `webfetch`. Their prompts describe a role only; where
-they run comes from the composed `AGENTS.md`.
+leaves exactly as OpenCode ships them. Both are **primary agents**: Tab cycles
+through them in the terminal UI.
+
+- **`review`** - the one to reach for before a change lands. It finds bugs and
+  reports them: editing is denied, and bash is gated on your approval so
+  `git diff` and `git log` stay available. It drives the `code-review` skill
+  above, hands `[SOTA-CHECK]` findings to `sota-review`, and never applies a
+  fix itself - when you want the fixes applied, `build` runs the same skill
+  with edit access.
+- **`chat`** - discussion only: editing *and* bash denied, since denying edits
+  alone still leaves `echo x > file`.
+
+Both deny `webfetch`, which is also why `sota-review`'s literature search is
+only half-available under `review` - it reports what it knows and labels the
+rest unverified. Their prompts describe a role only; where they run comes from
+the composed `AGENTS.md`.
 
 Check them with `opencode agent list` and `opencode debug skill` from inside a
 sandbox, and the generated config with `opencode debug config`. OpenCode

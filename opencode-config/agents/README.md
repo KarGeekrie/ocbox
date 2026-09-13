@@ -1,3 +1,12 @@
+---
+# Not an agent - this is the documentation for this directory. OpenCode loads
+# every *.md here as an agent, this file included: without `disable`, it shows
+# up in `opencode agent list` as an agent literally named "README", selectable
+# and callable, with default (unrestricted) permissions. `disable: true` is
+# what keeps it out - verified against a real container, before and after.
+disable: true
+---
+
 # Default agents
 
 One `<name>.md` per agent. The filename is the agent name, and the file is a
@@ -23,10 +32,12 @@ the prompt.
 ## What's here, and what isn't
 
 This directory holds the team's additional agents: `chat`, for talking through
-code without changing it, and `review`, for finding bugs in a change. `review`
-is read-only by design (see below) and reaches for the `code-review`/
-`sota-review` skills in `../skills/` for anything beyond a small diff;
-applying the fixes those skills can propose needs `build` instead, since
+code without changing it, and `review`, for finding bugs in a change. Both are
+`mode: primary`, so Tab cycles through them next to OpenCode's `build` and
+`plan` - reviewing is meant to be one keystroke away, not buried behind a
+subagent call. `review` is read-only by design (see below) and reaches for the
+`code-review`/`sota-review` skills in `../skills/` for anything beyond a small
+diff; applying the fixes those skills can propose needs `build` instead, since
 `review` can't edit.
 
 `build` and `plan` are deliberately **not** here. They are OpenCode's own
@@ -65,5 +76,12 @@ accepts the singular `agent/` too, but the plural is what the docs name.
 `opencode agent list` shows what actually loaded, and
 `opencode debug agent <name>` one agent's resolved configuration. A file
 OpenCode doesn't accept is simply absent from the list rather than reported as
-an error - this README, for instance, has no frontmatter and so is correctly
-ignored.
+an error.
+
+**Every `*.md` in this directory is loaded, including one with no frontmatter
+at all.** An earlier version of this file claimed the opposite - that a
+frontmatter-less README was "correctly ignored". It was not: it loaded as an
+agent named `README`, in mode `all` (so both selectable and callable as a
+subagent) with no permission restrictions. That is why this file now carries
+`disable: true`. Any other documentation you drop in here needs the same, or
+a name that doesn't end in `.md`.
