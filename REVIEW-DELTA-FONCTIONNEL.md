@@ -395,3 +395,148 @@ Le test existant `test_check_opencode_args_rejects_flags_ocbox_owns` reste vert.
 *Revue produite sur la branche `review/delta-fonctionnel`. Les scénarios 🔴/🟠
 ont été rejoués dynamiquement (Podman rootless réel, exécution du code ocbox,
 WebFetch de l'installeur OpenCode) et non seulement lus.*
+
+---
+
+## Suivi post-merge — 12/09/2026
+
+PR #8 mergée. PR #9 a ensuite livré les deux skills `code-review` et
+`sota-review`, plus un gros durcissement de `opencode.jsonc`
+(`read`/`edit`/`bash`) et des `environments/`. Nouvelle passe de vérification
+de la propagation **ocbox → OpenCode**, conteneur réel à l'appui.
+
+### Le point 5 est résolu — par le contenu, pas par mon retrait
+
+J'avais retiré les deux entrées `external_directory` vers
+`code-review`/`sota-review` **parce que ces skills n'existaient pas**. Ils
+existent maintenant, et le merge de PR #9 a légitimement remis les entrées.
+C'est le bon état : elles ne pointent plus dans le vide. Rien à refaire.
+
+### Ce qui propage correctement (vérifié dans un conteneur réel)
+
+| Vérification | Méthode | Résultat |
+|---|---|---|
+| Découverte des skills | `opencode debug skill` dans le conteneur | ✅ `code-review` et `sota-review`, `location` = `/home/ocbox/.config/opencode/skills/<nom>/SKILL.md` |
+| Agents d'équipe | `opencode agent list` | ✅ `chat` (primary) et `review` (subagent) à côté des intégrés |
+| Config d'équipe complète | `opencode debug config` | ✅ `external_directory`, `read`, `edit`, `bash` tels qu'écrits |
+| Config générée par ocbox (`--mount`) | `OPENCODE_CONFIG=…` + `debug config` | ✅ `/mnt/extra/**` s'ajoute **après** les règles d'équipe, sans les remplacer |
+| Lisibilité des `references/*.md` en sandbox | rejeu du matcher `util/wildcard.ts` | ✅ `allow` (voir ci-dessous), `/etc/hostname` reste `deny` |
+
+### 🟠 13 — Nouvelle non-conformité : les skills sont muets en `--no-sandbox`
+**`opencode-config/opencode.jsonc` (`permission.external_directory`)**
+
+Les deux entrées `allow` visent `~/.config/opencode/skills/<skill>/*`. C'est
+l'emplacement en mode **sandbox** uniquement. En `--no-sandbox`, ocbox assemble
+sa config dans le checkout et OpenCode charge les skills depuis
+`<checkout>/.ocbox/no-sandbox/opencode-config/skills/…` — vérifié
+empiriquement : `opencode debug skill` y rapporte bien
+`…/opencode-config/skills/code-review/SKILL.md`.
+
+Ce chemin ne matche aucune des deux entrées, donc `"*": "deny"` s'applique :
+le skill se charge, puis **chaque `references/*.md` qu'il tente de lire est
+refusé** — exactement au moment où il va chercher sa checklist. Rejeu du
+matcher officiel sur les chemins réels :
+
+```
+SANDBOX     allow  …/skills/code-review/references/checklist-python.md
+NO-SANDBOX  deny   …/.ocbox/no-sandbox/opencode-config/skills/code-review/references/checklist-python.md
+```
+
+**✅ Correctif appliqué** — ajout de deux entrées couvrant l'emplacement
+`--no-sandbox`, une par skill (et non un blanc-seing) :
+`"*/opencode-config/skills/code-review/*"` et `…/sota-review/*`. Rejeu du
+matcher après correctif : `allow` sur le chemin no-sandbox, `deny` maintenu sur
+`/etc/hostname` **et** sur un chemin voisin piégé
+(`/home/kar/secrets/opencode-config/skills-notes.md`).
+
+### 🟠 14 — Le commentaire « PATTERN MATCHING » de `opencode.jsonc` est faux
+**`opencode-config/opencode.jsonc` (en-tête du bloc `permission`)**
+
+Le commentaire affirmait : « The LAST matching rule wins - broad rules go
+first, specific ones after. **Reordering a block changes its meaning.** »
+
+Lecture de l'implémentation réelle (`packages/opencode/src/util/wildcard.ts`,
+récupérée depuis les sources publiques) :
+
+```ts
+.replace(/\*/g, ".*")     // * devient .*
+new RegExp("^" + escaped + "$", "s").test(str)
+// et Wildcard.all() : sortBy(longueur croissante) puis dernier match gagnant
+```
+
+Donc, à l'inverse de ce que dit le commentaire :
+1. **l'ordre d'écriture n'a aucun effet** — les motifs sont triés par longueur,
+   c'est le plus **long** qui matche qui l'emporte ;
+2. `*` **traverse les `/`** (regex `.*` + flag `s`), donc `<dir>/*` couvre bien
+   `<dir>/sub/fichier.md` — c'est ce qui rend lisibles les `references/` des
+   skills — et `**` n'est pas une forme « plus récursive » distincte.
+
+Un mainteneur qui aurait réordonné un bloc en se fiant à ce commentaire aurait
+cru changer la sémantique sans rien changer du tout ; pire, il aurait pu croire
+devoir écrire `**` pour atteindre un sous-dossier.
+
+**✅ Correctif appliqué** — commentaire réécrit d'après l'implémentation, en
+précisant les deux règles et la casse particulière du `" *"` final.
+
+### 🟠 15 — `compaction.reserved` ne fait rien (réglage silencieusement inerte)
+**`opencode-config/opencode.jsonc` (`compaction`)**
+
+Question posée : « `reserved: 10000`, c'est assez grand ? ». La réponse est que
+la valeur **n'est jamais lue** avec les modèles déclarés. Lecture de
+`packages/opencode/src/session/overflow.ts` :
+
+```ts
+const COMPACTION_BUFFER = 20_000
+const reserved = cfg.compaction?.reserved ?? Math.min(COMPACTION_BUFFER, maxOutputTokens(model))
+return model.limit.input
+  ? Math.max(0, model.limit.input - reserved)        // seule branche lisant `reserved`
+  : Math.max(0, context - maxOutputTokens(model))    // branche empruntée ici
+// isOverflow : tokens_session >= usable  ->  compaction auto
+```
+avec, dans `provider/transform.ts` :
+```ts
+export const OUTPUT_TOKEN_MAX = 32_000
+maxOutputTokens = Math.min(model.limit.output, outputTokenMax) || outputTokenMax
+```
+
+Nos cinq modèles déclarent `context` et `output`, **jamais `limit.input`** —
+optionnel au schéma (`required: ["context", "output"]`) et non rempli
+automatiquement pour un provider custom (`provider.ts` : `input: model.limit?.input
+?? existingModel?.limit?.input`, donc `undefined`). La branche `else` s'applique :
+
+| Modèle | `output` déclaré | `min(output, 32000)` | Seuil d'auto-compaction |
+|---|---|---|---|
+| Qwen3.8-27B-smart / -medium | 131072 | 32000 | **168 000** tokens |
+| smart-glm, Qwen3.6-35B-fast, -fast-think | 81920 | 32000 | **168 000** tokens |
+
+Le seuil est donc identique partout, et indépendant de `reserved` : 10000, 0 ou
+200000 donnent le même résultat. Deux conséquences secondaires :
+- déclarer `output: 131072` n'achète pas de réponse plus longue — opencode
+  plafonne à `OUTPUT_TOKEN_MAX = 32000` sauf variable d'environnement ;
+- si un jour `limit.input` est déclaré, `reserved: 10000` devient actif **et
+  moins prudent que le défaut d'opencode** (`min(20000, maxOutputTokens)` =
+  20000), alors que la passe de compaction doit elle-même tenir dans ce qui
+  reste.
+
+C'est le cas d'école que l'`AGENTS.md` du dépôt met en garde côté OpenCode : un
+réglage qui a l'air configuré et ne fait rien. Ici il n'est même pas rejeté,
+puisque la clé est valide — elle n'est simplement jamais atteinte.
+
+**✅ Correctif appliqué** — `auto`/`prune` sont conservés tels quels (ils, eux,
+agissent) ; la formule réelle, le seuil de 168000 et la condition
+`limit.input` sont documentés en commentaire au-dessus du bloc, plus une note
+sur le plafond de 32000 au-dessus de `models`. Aucun changement de
+comportement : le choix d'activer réellement `reserved` (déclarer `limit.input`)
+est une décision d'équipe sur les vraies capacités des modèles, pas une valeur
+que je peux inventer.
+
+### Points mineurs constatés, non corrigés (volontairement)
+
+- `skills/code-review/agents/fix-applicator.md` n'est **pas** un agent OpenCode
+  chargé (OpenCode ne découvre les agents que dans `…/opencode/agents/` ; la
+  liste résolue ne le contient pas). Ce n'est pas un bug : le `SKILL.md` le cite
+  comme *protocole* écrit, jamais comme `@fix-applicator`. À garder en tête si
+  quelqu'un veut un jour l'invoquer réellement.
+- `opencode debug file read` ne passe pas par la couche permissions (il échoue
+  sur « Path escapes the location ») : inutilisable pour tester une règle.
+  Le rejeu du matcher officiel est la méthode fiable, comme un stub LLM.

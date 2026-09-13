@@ -24,6 +24,64 @@ Only these sandboxed modes protect the host machine. `--no-sandbox` (see
 "Running without a sandbox") runs OpenCode directly on it, with nothing
 isolated.
 
+## Which mode protects you from what
+
+Two different risks are worth keeping apart: what the agent can **do to this
+machine**, and where your **code ends up**. They don't move together - the
+mode with no isolation at all still sends your code only to the team's own
+LLM, because that comes from `opencode.jsonc`, not from the sandbox.
+
+```
+  safest   ▲   ocbox                rootless Podman container: --network=none,
+           │   ocbox --tui          only this project mounted, packages frozen
+           │                        at image build, the LLM reachable through
+           │                        ocbox's relay and nothing else
+           │
+           │   ·········  no rung here today - see "What about a mode
+           │              with internet?" below  ·········
+           │
+           │   ocbox --no-sandbox   no isolation: OpenCode can touch anything
+           │                        you can. But the team's configuration still
+           │                        applies - local LLM, cloud providers
+           │                        disabled, permission rules enforced
+           ▼
+  riskiest     OpenCode on its own  nothing: whatever provider is configured
+               (no ocbox)           (a cloud one, typically), no permission
+                                    rules, full access to your home directory
+```
+
+| | `ocbox` / `--tui` | `--no-sandbox` | no ocbox |
+|---|---|---|---|
+| **Filesystem** | this project (+ `--mount`) only | your whole account | your whole account |
+| **Network** | none, except the LLM relay | everything | everything |
+| **Where your code goes** | the LLM in `opencode.jsonc` | the LLM in `opencode.jsonc` | wherever that install points - possibly a cloud provider |
+| **Permission rules** | enforced | enforced | none unless you wrote some |
+| **Installing packages** | impossible mid-session: fixed when the image is built | can install anything, on your real system | unrestricted |
+
+The short version: use `ocbox` (or `--tui`). Reach for `--no-sandbox` when you
+genuinely need the host - and read "Running without a sandbox" first. Running
+an agent with no configuration at all is the only line above that risks your
+code leaving the building.
+
+### What about a mode with internet?
+
+There is **no such option today** - no flag gives the container internet while
+keeping it off your local network. The container is `--network=none`, full
+stop; `--mount`, extra packages and the LLM relay are the only ways anything
+crosses the boundary.
+
+It isn't an oversight, but it also isn't hard to want: a task that needs
+`pip install`, `git clone` or a docs lookup currently means rebuilding the
+image with the right packages, or dropping to `--no-sandbox`. The reason it
+hasn't been added is that "internet but not the LAN" is not a podman flag:
+rootless podman's default networking NATs out to *everything* your machine can
+reach, your intranet and any service on the host included, which is a wider
+opening than the isolation this project is built around. Doing it properly
+means a filtered network namespace (pasta/slirp4netns with an explicit
+allow-list, or an egress proxy), plus deciding what the agent is allowed to
+fetch. If your team wants that rung, open an issue - it's a design decision,
+not a missing line of code.
+
 ## Requirements
 
 - Linux
