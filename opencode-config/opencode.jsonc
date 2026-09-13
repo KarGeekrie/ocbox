@@ -222,8 +222,11 @@
     // external_directory's "*": "deny" already refuses it. An entry here
     // couldn't target it anyway: edit patterns are worktree-relative, and a
     // project can hold its own .config/ or .bashrc.
+    // No "*": "allow" here: OpenCode already allows edits by default, and a
+    // config rule comes after the built-in plan agent's own restriction ("*":
+    // "deny" except its plan files), so it would lift it. The built-in `plan`
+    // is left exactly as OpenCode ships it.
     "edit": {
-      "*": "allow",
       "*.ssh/*": "deny",
       "*.gnupg/*": "deny",
       // Skills are read, never rewritten: an edited skill would reach every
@@ -340,35 +343,6 @@
       "rm -rf /*": "deny",
       "rm -rf ~*": "deny",
       "rm -rf $HOME*": "deny"
-    }
-  },
-
-  // Plan agent. OpenCode's built-in `plan` may edit nothing but its plan
-  // file, but those rules sit among its defaults, and the global "edit"
-  // block above ("*": "allow") comes after them and lifts the restriction.
-  // So they're restated here, where they come last. A bare "edit": "deny"
-  // re-denied everything, the plan file included. Only permissions are
-  // touched, never the prompt - the reason agents/build.md and agents/plan.md
-  // don't exist (see agents/README.md).
-  "agent": {
-    "plan": {
-      "permission": {
-        "edit": {
-          "*": "deny",
-          ".opencode/plans/*.md": "allow",
-          "*/.local/share/opencode/plans/*.md": "allow"
-        },
-        "bash": {
-          "*": "ask",
-          "git status*": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "ls *": "allow",
-          "cat *": "allow",
-          "module avail*": "allow",
-          "module spider*": "allow"
-        }
-      }
     }
   }
 }

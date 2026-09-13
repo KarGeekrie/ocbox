@@ -12,8 +12,9 @@ Mirrors opencode 1.18.30's bundled code:
 - read and edit ask with the path relative to the worktree; external_directory
   asks with the absolute parent directory plus "/*".
 
-OpenCode's own defaults come before the config and only decide what nothing
-here matches, so the rules below are the config's alone.
+OpenCode's own rules come before the config and decide whatever the config
+doesn't match: the default allow-everything rule, and the built-in plan
+agent's restrictions, both as `opencode debug agent` resolves them.
 """
 
 from __future__ import annotations
@@ -62,35 +63,45 @@ def config() -> dict:
     return jsonc.load(CONFIG)
 
 
+# OpenCode 1.18.30's defaults that matter here, and what its built-in plan agent
+# adds on top of them.
+DEFAULTS = [("*", "*", "allow"), ("external_directory", "*", "ask")]
+PLAN_BUILTINS = [
+    ("external_directory", f"{HOME}/.local/share/opencode/plans/*", "allow"),
+    ("edit", "*", "deny"),
+    ("edit", ".opencode/plans/*.md", "allow"),
+    ("edit", "home/u/.local/share/opencode/plans/*.md", "allow"),
+]
+
+
 @pytest.fixture(scope="module")
 def build(config) -> list[tuple[str, str, str]]:
-    return _rules(config["permission"])
+    return DEFAULTS + _rules(config["permission"])
 
 
 @pytest.fixture(scope="module")
-def plan(config, build) -> list[tuple[str, str, str]]:
-    return build + _rules(config["agent"]["plan"]["permission"])
+def plan(config) -> list[tuple[str, str, str]]:
+    return DEFAULTS + PLAN_BUILTINS + _rules(config["permission"])
 
 
-# ---- plan --------------------------------------------------------------------
+# ---- plan: left as OpenCode ships it ------------------------------------------
+
+
+def test_the_config_does_not_redefine_plan(config) -> None:
+    assert "plan" not in config.get("agent", {})
 
 
 @pytest.mark.parametrize(
     "path",
-    [
-        ".opencode/plans/1726-refactor.md",
-        "home/u/.local/share/opencode/plans/1726-refactor.md",
-        "../../.local/share/opencode/plans/1726-refactor.md",
-    ],
+    [".opencode/plans/1726-refactor.md", "home/u/.local/share/opencode/plans/1726-refactor.md"],
 )
-def test_plan_can_write_its_plan_file(plan, path) -> None:
-    """A bare `edit: "deny"` for plan, coming last, used to deny this too."""
+def test_plan_keeps_writing_its_plan_file(plan, path) -> None:
     assert _evaluate(plan, "edit", path) == "allow"
 
 
-def test_plan_cannot_edit_project_files(plan) -> None:
-    """The global edit block ("*": "allow") comes after OpenCode's own plan
-    restriction, so the config has to restate it."""
+def test_plan_keeps_its_own_restriction_on_project_files(plan) -> None:
+    """A config "edit" rule matching everything - even "*": "allow", which
+    looks harmless - comes after plan's built-in "*": "deny" and lifts it."""
     assert _evaluate(plan, "edit", "src/app.py") == "deny"
 
 

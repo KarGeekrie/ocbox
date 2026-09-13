@@ -279,8 +279,10 @@ opencode 1.18.29 and its published schema:
 
   Two consequences found this way:
   - The global `edit: {"*": "allow"}` lifted the built-in `plan` agent's edit
-    restriction, and the bare `edit: "deny"` added to restore it also denied
-    its plan file.
+    restriction, since config rules come after an agent's built-ins. The bare
+    `edit: "deny"` added to restore it also denied plan's own plan file. Both
+    are gone: the config sets no `edit` rule matching everything, and `plan` is
+    left exactly as OpenCode ships it.
   - OpenCode's own allow rules for loaded skills sit among its defaults, where
     the team's `"*": "deny"` overrides them.
 
