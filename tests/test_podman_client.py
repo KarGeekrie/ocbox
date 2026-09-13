@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ocbox.podman_client import PodmanClient, PodmanError
+from ocbox.podman_client import QUERY_TIMEOUT, PodmanClient, PodmanError
 
 
 @patch("ocbox.podman_client.subprocess.run")
@@ -109,3 +109,50 @@ def test_container_exists_true_on_zero_exit(mock_run) -> None:
 def test_container_exists_false_on_nonzero_exit(mock_run) -> None:
     mock_run.return_value = MagicMock(returncode=1)
     assert PodmanClient().container_exists("ocbox-foo") is False
+
+
+# ---- a podman that stops answering ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda c: c.image_exists("t"),
+        lambda c: c.image_label("t", "l"),
+        lambda c: c.container_exists("c"),
+        lambda c: c.list_containers(),
+    ],
+)
+@patch(
+    "ocbox.podman_client.subprocess.run",
+    side_effect=subprocess.TimeoutExpired(["podman"], QUERY_TIMEOUT),
+)
+def test_a_query_that_hangs_raises_podman_error(mock_run, call) -> None:
+    with pytest.raises(PodmanError, match="did not answer"):
+        call(PodmanClient())
+
+
+@patch("ocbox.podman_client.subprocess.run")
+def test_queries_are_bounded(mock_run) -> None:
+    mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    client = PodmanClient()
+    client.image_exists("t")
+    client.container_exists("c")
+    client.list_containers()
+    assert [call.kwargs["timeout"] for call in mock_run.call_args_list] == [QUERY_TIMEOUT] * 3
+
+
+@patch(
+    "ocbox.podman_client.subprocess.run",
+    side_effect=subprocess.TimeoutExpired(["podman", "stop"], 70),
+)
+def test_a_stop_that_hangs_returns_for_the_caller_to_check(mock_run) -> None:
+    PodmanClient().stop("c")
+
+
+@patch("ocbox.podman_client.subprocess.run")
+def test_builds_are_not_bounded(mock_run) -> None:
+    """A --no-cache base image build takes minutes."""
+    PodmanClient().build("FROM scratch\n", "t:latest")
+    assert "timeout" not in mock_run.call_args.kwargs
+

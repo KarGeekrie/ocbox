@@ -167,12 +167,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "list":
         return cmd_list()
-    if args.command == "stop":
-        return fleet.stop_sandbox(PodmanClient(), args.target)
-    if args.command == "attach":
-        return fleet.attach_sandbox(PodmanClient(), args.target)
-    if args.command == "exec":
-        return fleet.exec_shell(PodmanClient(), args.target, args.cmd or None)
+    if args.command in ("stop", "attach", "exec"):
+        podman = PodmanClient()
+        try:
+            if args.command == "stop":
+                return fleet.stop_sandbox(podman, args.target)
+            if args.command == "attach":
+                return fleet.attach_sandbox(podman, args.target)
+            return fleet.exec_shell(podman, args.target, args.cmd or None)
+        except PodmanError as exc:
+            print(f"ocbox: {exc}", file=sys.stderr)
+            return 1
 
     if args.detach and args.tui:
         print(

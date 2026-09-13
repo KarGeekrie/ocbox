@@ -393,8 +393,10 @@ need `/dev/net/tun` access fixed at the host level instead.
 - Commit messages: explain *why*, matching the existing history's style
   (see `git log`) - what problem motivated the change, not a restatement of
   the diff.
-- This repo has no CI configured yet - your local `pytest` + `ruff check`
-  run is the only gate. Don't skip it.
+- CI (`.github/workflows/ci.yml`) runs `ruff check` and the unit tests on
+  Python 3.11-3.13, plus the Podman integration suite, on every pull request
+  and on pushes to main. Still run them locally before pushing: a red CI is a
+  round trip you could have avoided.
 - **Hand open points back, don't let them dissolve.** When you decide not to
   fix something you found - out of scope, needs a judgement call, or you
   couldn't prove the safe answer - say so explicitly in the PR description or

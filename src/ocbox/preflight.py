@@ -12,6 +12,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ocbox.podman_client import QUERY_TIMEOUT
+
 
 class PreflightError(Exception):
     """Raised when the host isn't ready to run a rootless Podman sandbox."""
@@ -29,9 +31,13 @@ def check_podman_installed() -> str:
         )
     try:
         result = subprocess.run(
-            ["podman", "--version"], capture_output=True, text=True, check=True
+            ["podman", "--version"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=QUERY_TIMEOUT,
         )
-    except (subprocess.CalledProcessError, OSError) as exc:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         raise PreflightError(
             f"Found podman at {path} but `podman --version` failed: {exc}"
         ) from exc
@@ -45,8 +51,9 @@ def check_rootless() -> None:
             capture_output=True,
             text=True,
             check=True,
+            timeout=QUERY_TIMEOUT,
         )
-    except (subprocess.CalledProcessError, OSError) as exc:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         raise PreflightError(f"`podman info` failed: {exc}") from exc
 
     try:
