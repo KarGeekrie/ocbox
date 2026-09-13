@@ -373,3 +373,12 @@ need `/dev/net/tun` access fixed at the host level instead.
   the diff.
 - This repo has no CI configured yet - your local `pytest` + `ruff check`
   run is the only gate. Don't skip it.
+- **Hand open points back, don't let them dissolve.** When you decide not to
+  fix something you found - out of scope, needs a judgement call, or you
+  couldn't prove the safe answer - say so explicitly in the PR description or
+  review, with what you'd do about it, and bring it up again when you next
+  report. A finding mentioned once in the middle of a long message is a
+  finding lost. The same goes for a claim you couldn't verify: state that it's
+  unverified and what verifying it would take, rather than quietly rounding it
+  to "fine". The reviewer decides; your job is to make sure the decision is
+  actually put to them.

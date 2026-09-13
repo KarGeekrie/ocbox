@@ -103,6 +103,49 @@ def test_runtime_dir_idempotent(tmp_path: Path, monkeypatch) -> None:
     assert second.exists()
 
 
+def test_runtime_dir_path_creates_nothing(tmp_path: Path, monkeypatch) -> None:
+    """The read side (`ocbox list`/`attach`, the start-up check) asks for other
+    projects' slugs - creating a directory per slug just to look inside would
+    litter $XDG_RUNTIME_DIR."""
+    xdg = tmp_path / "runtime"
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg))
+
+    path = project.runtime_dir_path("someone-elses-slug")
+
+    assert path == xdg / "ocbox" / "someone-elses-slug"
+    assert not path.exists()
+    assert not (xdg / "ocbox").exists()
+
+
+def test_runtime_dir_path_does_not_create_the_tmp_fallback(tmp_path: Path, monkeypatch) -> None:
+    """Same for the no-XDG_RUNTIME_DIR fallback, which used to be created just
+    by asking for the path."""
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    created: list = []
+    monkeypatch.setattr(project, "_mkdir_private", created.append)
+
+    project.runtime_dir_path("myslug")
+
+    assert created == []
+
+
+def test_runtime_dir_still_creates_private_parents_without_xdg(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Making the path pure must not cost the 0700 guarantee on the writing
+    side: _mkdir_private still creates every missing ancestor privately."""
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    fallback = tmp_path / "tmp-ocbox-uid"
+    monkeypatch.setattr(project, "_xdg_runtime_dir", lambda: fallback)
+
+    path = project.runtime_dir("myslug")
+
+    assert path.exists()
+    assert _mode(path) == 0o700
+    assert _mode(fallback / "ocbox") == 0o700
+    assert _mode(fallback) == 0o700
+
+
 def test_state_dir_created(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     path = project.state_dir("myslug")
