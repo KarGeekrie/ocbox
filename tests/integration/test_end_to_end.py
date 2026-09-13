@@ -20,6 +20,7 @@ import http.server
 import json
 import os
 import shutil
+import socket
 import tempfile
 import threading
 import time
@@ -86,6 +87,26 @@ def test_image_tag() -> str:
     return IMAGE_TAG
 
 
+def _wait_for_tcp(port: int, timeout: float = 10.0, poll_interval: float = 0.05) -> None:
+    """Waits until something accepts connections on 127.0.0.1:<port>.
+
+    The web relay is a subprocess ocbox starts, so `start_web_relay()`
+    returning means "spawned", not "listening". This used to be a flat
+    `time.sleep(0.3)`, which lost the race often enough to fail the whole
+    suite on a `URLError` from the first request - the same reason the
+    container side is awaited with `network.wait_for_unix_socket()` rather
+    than slept on.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket() as probe:
+            probe.settimeout(0.2)
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                return
+        time.sleep(poll_interval)
+    raise AssertionError(f"web relay never started listening on 127.0.0.1:{port}")
+
+
 def _get(url: str, token: str | None = None, timeout: float = 5) -> tuple[int, bytes]:
     headers = {}
     if token is not None:
@@ -150,8 +171,7 @@ def test_full_sandbox_roundtrip(tmp_path: Path, stub_llm: int, test_image_tag: s
 
         base_url = f"http://127.0.0.1:{host_web_port}"
 
-        # Give the web relay a moment to bind before the first real request.
-        time.sleep(0.3)
+        _wait_for_tcp(host_web_port)
 
         # 1. No/wrong credentials -> 401 (the auth wiring is real, not a stub).
         status, _ = _get(base_url + "/")
