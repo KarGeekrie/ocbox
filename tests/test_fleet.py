@@ -166,3 +166,26 @@ def test_exec_shell_uses_a_given_command() -> None:
 
     fleet.exec_shell(podman, "ocbox-foo", ["bash", "-l"])
     podman.exec_interactive.assert_called_once_with("ocbox-foo", ["bash", "-l"])
+
+
+# ---- listing stays read-only ------------------------------------------------
+
+
+def test_list_running_creates_no_directories(tmp_path, monkeypatch) -> None:
+    """Listing asks about other projects' slugs; it must not create a run
+    directory for each one on the way to reading their connect.json."""
+    xdg = tmp_path / "runtime"
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg))
+    podman = MagicMock()
+    podman.list_containers.return_value = [
+        {
+            "Names": ["ocbox-otherproj-deadbeef0000"],
+            "Labels": {"ocbox.slug": "otherproj-deadbeef0000", "ocbox.mode": "web"},
+            "Status": "Up 2 hours",
+        }
+    ]
+
+    infos = fleet.list_running(podman)
+
+    assert infos[0].web_url is None  # no connect.json to read
+    assert not (xdg / "ocbox").exists()

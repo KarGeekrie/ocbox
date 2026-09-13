@@ -403,6 +403,11 @@ sandbox's sockets and credentials on its way out. A sandbox running for a
 *different* project is only mentioned in passing, so a detached one doesn't
 get forgotten.
 
+These four subcommands deliberately skip the update check described under
+"Updating": a required release stops you from *starting* a sandbox, but you
+can always list, attach to, or stop one that is already running - being told
+to update first is no help when what you want is to shut something down.
+
 Two things this doesn't cover: a sandbox started by an ocbox predating these
 labels won't show up until restarted (`podman ps` directly still works on
 it), and if a `--detach`'d ocbox process itself is killed uncleanly (not

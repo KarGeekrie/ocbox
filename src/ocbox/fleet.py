@@ -41,7 +41,7 @@ def _connect_url(slug: str) -> str | None:
     once sandbox.run() knows the host port (not knowable at container-creation
     time, so it isn't a label - see sandbox.py). None for tui mode, or a
     sandbox whose run_dir predates this file."""
-    connect_file = project.runtime_dir(slug) / "connect.json"
+    connect_file = project.runtime_dir_path(slug) / "connect.json"
     try:
         data = json.loads(connect_file.read_text())
         return auth.build_web_url(data["host_web_port"])
@@ -111,7 +111,8 @@ def attach_sandbox(podman: PodmanClient, target: str) -> int:
         print(f"ocbox: no running sandbox found for {target!r}")
         return 1
     slug = name.removeprefix("ocbox-")
-    run_dir = project.runtime_dir(slug)
+    # Path only: attaching reads a run directory someone else owns and created.
+    run_dir = project.runtime_dir_path(slug)
     try:
         connect = json.loads((run_dir / "connect.json").read_text())
         creds = auth.read_env_file(run_dir / "env")

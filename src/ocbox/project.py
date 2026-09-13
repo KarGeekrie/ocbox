@@ -47,12 +47,18 @@ def _mkdir_private(path: Path) -> None:
 
 
 def _xdg_runtime_dir() -> Path:
+    """The base directory - computed, never created.
+
+    The `/tmp` fallback used to be created here, which meant merely *asking*
+    for a path had a side effect. Creation belongs to `runtime_dir()`, whose
+    `_mkdir_private()` already creates every missing ancestor at 0700 - so the
+    fallback still ends up private, just at the point something actually
+    writes there.
+    """
     raw = os.environ.get("XDG_RUNTIME_DIR")
     if raw:
         return Path(raw)
-    path = Path(f"/tmp/ocbox-{os.getuid()}")
-    _mkdir_private(path)
-    return path
+    return Path(f"/tmp/ocbox-{os.getuid()}")
 
 
 def _xdg_state_home() -> Path:
@@ -62,8 +68,21 @@ def _xdg_state_home() -> Path:
     return Path.home() / ".local" / "state"
 
 
+def runtime_dir_path(slug: str) -> Path:
+    """Where a project's per-run files live - computed, never created.
+
+    The reading side needs this: `ocbox list`/`attach` and the start-up check
+    ask about *other* projects' slugs, and `runtime_dir()` would create a
+    directory for each one just to look for a `connect.json` inside it -
+    scattering empty 0700 directories through $XDG_RUNTIME_DIR for every
+    sandbox ocbox has ever seen. Whoever owns the run calls `runtime_dir()`.
+    """
+    return _xdg_runtime_dir() / "ocbox" / slug
+
+
 def runtime_dir(slug: str) -> Path:
-    path = _xdg_runtime_dir() / "ocbox" / slug
+    """`runtime_dir_path()`, created 0700 - for the run that owns it."""
+    path = runtime_dir_path(slug)
     _mkdir_private(path)
     # Re-assert 0700 even when the directory already existed: a compromised
     # sandbox (same uid under --userns=keep-id) can chmod its bind-mounted
