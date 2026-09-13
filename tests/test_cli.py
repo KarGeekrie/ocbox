@@ -5,9 +5,10 @@ import pytest
 from ocbox import cli
 from ocbox.cli import build_parser, main
 from ocbox.config import ConfigError
+from ocbox.fleet import SandboxInfo
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError
-from ocbox.sandbox import NoSandboxError
+from ocbox.sandbox import NoSandboxError, SandboxBusyError
 from ocbox.update_check import UpdateStatus
 
 
@@ -219,6 +220,19 @@ def test_main_reports_no_sandbox_error_cleanly(mock_run_no_sandbox, capsys) -> N
 
 @patch("ocbox.cli.run_preflight")
 @patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", side_effect=SandboxBusyError("ocbox-proj-abc is already running"))
+def test_main_reports_a_busy_sandbox_cleanly(
+    mock_run, mock_config, mock_preflight, capsys
+) -> None:
+    """Refusing a second sandbox for the same project must read like every
+    other ocbox error, not a traceback."""
+    exit_code = main([])
+    assert exit_code == 1
+    assert "ocbox: ocbox-proj-abc is already running" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
 @patch("ocbox.cli.run", return_value=0)
 def test_main_forwards_extra_mounts(mock_run, mock_config, mock_preflight, tmp_path) -> None:
     extra = tmp_path / "other-repo"
@@ -301,3 +315,92 @@ def test_main_rejects_mounts_with_colliding_basenames(tmp_path, capsys) -> None:
     exit_code = main(["--mount", str(a), "--mount", str(b)])
     assert exit_code == 1
     assert "distinct names" in capsys.readouterr().err
+
+
+# ---- list / stop / attach / exec subcommands -------------------------------
+
+
+def test_main_with_no_subcommand_still_runs_normally() -> None:
+    """Adding subparsers must not break the default, no-subcommand invocation
+    that launches a sandbox in cwd - the vast majority of `ocbox` calls."""
+    args = build_parser().parse_args([])
+    assert args.command is None
+
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_dispatches_list_subcommand(mock_fleet, mock_podman_cls) -> None:
+    mock_fleet.list_running.return_value = []
+    exit_code = main(["list"])
+    assert exit_code == 0
+    mock_fleet.list_running.assert_called_once_with(mock_podman_cls.return_value)
+
+
+def test_cmd_list_prints_a_table_for_running_sandboxes() -> None:
+    with patch("ocbox.cli.PodmanClient"), patch("ocbox.cli.fleet") as mock_fleet:
+        mock_fleet.list_running.return_value = [
+            SandboxInfo(
+                container_name="ocbox-foo",
+                slug="foo",
+                workdir="/home/user/foo",
+                mode="web",
+                status="Up 5 minutes",
+                web_url="http://127.0.0.1:1234",
+            )
+        ]
+        exit_code = cli.cmd_list()
+    assert exit_code == 0
+
+
+def test_cmd_list_reports_when_nothing_running(capsys) -> None:
+    with patch("ocbox.cli.PodmanClient"), patch("ocbox.cli.fleet") as mock_fleet:
+        mock_fleet.list_running.return_value = []
+        exit_code = cli.cmd_list()
+    assert exit_code == 0
+    assert "no sandboxes running" in capsys.readouterr().out
+
+
+def test_cmd_list_reports_podman_errors(capsys) -> None:
+    with patch("ocbox.cli.PodmanClient"), patch("ocbox.cli.fleet") as mock_fleet:
+        mock_fleet.list_running.side_effect = PodmanError("boom")
+        exit_code = cli.cmd_list()
+    assert exit_code == 1
+    assert "boom" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_dispatches_stop_subcommand(mock_fleet, mock_podman_cls) -> None:
+    mock_fleet.stop_sandbox.return_value = 0
+    exit_code = main(["stop", "myslug"])
+    assert exit_code == 0
+    mock_fleet.stop_sandbox.assert_called_once_with(mock_podman_cls.return_value, "myslug")
+
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_dispatches_attach_subcommand(mock_fleet, mock_podman_cls) -> None:
+    mock_fleet.attach_sandbox.return_value = 0
+    exit_code = main(["attach", "myslug"])
+    assert exit_code == 0
+    mock_fleet.attach_sandbox.assert_called_once_with(mock_podman_cls.return_value, "myslug")
+
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_dispatches_exec_subcommand_default_shell(mock_fleet, mock_podman_cls) -> None:
+    mock_fleet.exec_shell.return_value = 0
+    exit_code = main(["exec", "myslug"])
+    assert exit_code == 0
+    mock_fleet.exec_shell.assert_called_once_with(mock_podman_cls.return_value, "myslug", None)
+
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_dispatches_exec_subcommand_with_a_command(mock_fleet, mock_podman_cls) -> None:
+    mock_fleet.exec_shell.return_value = 0
+    exit_code = main(["exec", "myslug", "bash", "-l"])
+    assert exit_code == 0
+    mock_fleet.exec_shell.assert_called_once_with(
+        mock_podman_cls.return_value, "myslug", ["bash", "-l"]
+    )

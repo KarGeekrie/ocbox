@@ -7,7 +7,9 @@ failures.
 
 from __future__ import annotations
 
+import json
 import subprocess
+import sys
 from dataclasses import dataclass
 
 
@@ -96,3 +98,44 @@ class PodmanClient:
             text=True,
             check=False,
         )
+
+    def container_exists(self, name: str) -> bool:
+        result = subprocess.run(
+            [self.binary, "container", "exists", name], capture_output=True, text=True, check=False
+        )
+        return result.returncode == 0
+
+    def list_containers(self, *, label: str | None = None) -> list[dict]:
+        """Running containers, as `podman ps` reports them - the raw dicts
+        (`Names` a list, `Labels` a dict, `Status` a human string like
+        "Up 5 minutes"; verified against real podman 4.9.3 output), not a
+        shape this wrapper invents. `label` is an existence filter ("key" or
+        "key=value") narrowing to containers carrying it.
+
+        Raises PodmanError on failure (unlike image_exists/stop): this backs
+        real operations (`ocbox list`, the startup warning) that should hear
+        about a broken podman rather than silently see "nothing running".
+        """
+        args = ["ps", "--format", "json"]
+        if label:
+            args += ["--filter", f"label={label}"]
+        result = self.run_capture(args)
+        try:
+            return json.loads(result.stdout) if result.stdout.strip() else []
+        except json.JSONDecodeError as exc:
+            raise PodmanError(f"could not parse `podman ps` output: {exc}") from exc
+
+    def exec_interactive(self, name: str, cmd: list[str]) -> int:
+        """Runs `cmd` inside a running container, inheriting this process's
+        stdio so the user gets a real terminal, and returns its exit code.
+
+        `-t` only when stdin is a TTY: podman refuses to allocate one
+        otherwise, so asking for it unconditionally would turn a piped or
+        cron-driven `ocbox exec` into an error about the input device instead
+        of just running the command.
+        """
+        flags = ["-it"] if sys.stdin.isatty() else ["-i"]
+        try:
+            return subprocess.call([self.binary, "exec", *flags, name, *cmd])
+        except OSError as exc:
+            raise PodmanError(f"Could not execute `{self.binary}`: {exc}") from exc

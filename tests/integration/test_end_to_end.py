@@ -131,6 +131,7 @@ def test_full_sandbox_roundtrip(tmp_path: Path, stub_llm: int, test_image_tag: s
         skills_dir=empty_dir,
         data_volume="ocbox-integration-test-home",
         container_name="ocbox-integration-test",
+        slug="integration-test",
         container_web_port=container_web_port,
         container_llm_port=container_llm_port,
     )
@@ -271,6 +272,7 @@ def test_tui_mode_runs_real_entrypoint_and_reaches_llm(
         skills_dir=empty_dir,
         data_volume="ocbox-integration-test-home-tui",
         container_name="ocbox-integration-test-tui",
+        slug="integration-test-tui",
         container_web_port=4096,
         container_llm_port=8081,
         mode="tui",
