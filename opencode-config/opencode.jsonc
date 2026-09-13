@@ -33,8 +33,28 @@
   "experimental": {
     "openTelemetry": false
   },
+  // NOTE: "reserved" is INERT with the models declared below, and raising it
+  // changes nothing. Checked against opencode's session/overflow.ts:
+  //
+  //   reserved = cfg.compaction.reserved ?? min(20000, maxOutputTokens(model))
+  //   usable   = model.limit.input ? model.limit.input - reserved
+  //                                : context - maxOutputTokens(model)
+  //   auto-compaction fires when the session's token count >= usable
+  //
+  // "reserved" is only read on the first branch, which needs the model to
+  // declare limit.input. Ours declare context + output only (limit.input is
+  // optional in the schema and is not filled in for a custom provider), so the
+  // second branch applies and the threshold is context - min(output, 32000):
+  // 200000 - 32000 = 168000 tokens for every model below.
+  //
+  // To actually control it, declare "input" in a model's "limit" - then
+  // reserved applies and should be at least opencode's own default of 20000,
+  // since the compaction pass itself has to fit in what's left.
   "compaction": {
     "auto": true,
+    // Old tool outputs are kept rather than pruned: a review that read twenty
+    // files should still be able to quote them. Flip to true if sessions hit
+    // the threshold above too fast.
     "prune": false,
     "reserved": 10000
   },
@@ -55,6 +75,12 @@
         // README's TODO.
         "baseURL": "http://127.0.0.1:11434/v1"
       },
+      // On "limit": opencode clamps a model's output to OUTPUT_TOKEN_MAX
+      // (32000, unless OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX says otherwise),
+      // so declaring 131072 below does not buy a longer answer - and since the
+      // auto-compaction threshold is context - min(output, 32000), every model
+      // here compacts at 168000 tokens. Add "input" to a "limit" block if you
+      // want compaction.reserved to have any effect (see the note above it).
       "models": {
         "Qwen3.8-27B-smart": {
           "name": "Qwen3.8-27B-smart",
@@ -127,9 +153,18 @@
   // and it's the only thing standing between the model and the real host in
   // --no-sandbox.
   //
-  // PATTERN MATCHING: * matches zero or more characters, ? matches exactly
-  // one. The LAST matching rule wins - broad rules go first, specific ones
-  // after. Reordering a block changes its meaning.
+  // PATTERN MATCHING, as implemented in opencode's util/wildcard.ts (read at
+  // 1.18.x, not guessed): a pattern becomes a regex anchored at both ends
+  // where * -> .* and ? -> . , compiled with the dotAll flag. Two consequences
+  // worth knowing before editing a block:
+  //   - * CROSSES "/" freely. "<dir>/*" therefore also covers
+  //     "<dir>/sub/file.md", and ** is not a distinct, more-recursive form.
+  //   - Rules are sorted by pattern LENGTH (shortest first) and the last match
+  //     wins, so the most SPECIFIC (longest) pattern wins wherever it sits.
+  //     The order rules are written in does NOT change their meaning; a rule
+  //     only loses to a strictly longer pattern that also matches.
+  // ("ls *" and friends get one extra rule: a trailing " *" is made optional,
+  // so "ls *" matches a bare "ls" too.)
   "permission": {
     // external_directory stays deny-by-default on purpose (see
     // _generate_opencode_config() in sandbox.py): a mounted --mount directory
@@ -140,8 +175,21 @@
     // rest of the host filesystem, so keep it strict rather than "ask".
     "external_directory": {
       "*": "deny",
+      // Sandboxed modes: skills/ is bind-mounted at OpenCode's global skills
+      // path, so this is where a skill's own SKILL.md, references/ and
+      // agents/ files live. Verified in a real container: these three land as
+      // "allow" while /etc/hostname stays denied.
       "~/.config/opencode/skills/code-review/*": "allow",
-      "~/.config/opencode/skills/sota-review/*": "allow"
+      "~/.config/opencode/skills/sota-review/*": "allow",
+      // --no-sandbox: the very same skills are reached through the config
+      // directory ocbox assembles inside the checkout
+      // (.ocbox/no-sandbox/opencode-config/skills/...), which is NOT under
+      // ~/.config/opencode - verified with `opencode debug skill`, which
+      // reports that path. Without these two entries the skills load but every
+      // references/*.md they try to read is denied by "*" above. The leading *
+      // covers wherever the checkout happens to live.
+      "*/opencode-config/skills/code-review/*": "allow",
+      "*/opencode-config/skills/sota-review/*": "allow"
     },
     "doom_loop": "deny",
 
