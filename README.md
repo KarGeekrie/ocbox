@@ -395,10 +395,13 @@ ocbox exec <target> [cmd...]     # a shell inside it (default: sh) - for poking
 project path (`.` for the current directory). `ocbox attach` only redisplays
 connection info - it doesn't open a shell; use `ocbox exec` for that.
 
-Starting a normal `ocbox` run also checks for other sandboxes already
-running and prints a one-line notice if it finds any, so a detached one
-doesn't get forgotten - more insistent if it's this exact project (starting
-a second one would collide on the container name anyway).
+Starting a normal `ocbox` run checks for sandboxes already running. If one is
+already up **for this project, ocbox refuses to start** and points you at
+`ocbox attach` / `ocbox stop`: the two runs would share a run directory, so
+the second one wouldn't merely fail to start - it would delete the running
+sandbox's sockets and credentials on its way out. A sandbox running for a
+*different* project is only mentioned in passing, so a detached one doesn't
+get forgotten.
 
 Two things this doesn't cover: a sandbox started by an ocbox predating these
 labels won't show up until restarted (`podman ps` directly still works on

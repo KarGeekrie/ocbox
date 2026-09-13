@@ -104,6 +104,17 @@ exactly how the integration tests were validated during initial development
   `.ocbox/` (`image.repo_local_dir()`): the config directory it assembles, and
   an OpenCode binary it installs when none exists on `PATH` or in
   `~/.opencode/bin`.
+- `fleet.py` is the cross-project half: `ocbox list`/`stop`/`attach`/`exec`
+  act on containers started by a *previous* (possibly different) ocbox run, in
+  any project. It finds them by the `ocbox.*` labels `build_podman_run_argv()`
+  attaches, never by name prefix - an unrelated container someone named
+  `ocbox-something` must not be mistaken for one of ours. The host web port
+  isn't knowable when the container is created, so it isn't a label: `run()`
+  writes it to `connect.json` in the run dir once the port is picked, and
+  `attach` reads it back. `run()` also calls `_check_other_sandboxes()` from
+  here, which *refuses* a second sandbox for the same project rather than
+  warning - the two share a run directory, so the second one's teardown would
+  delete the first's sockets and auth file.
 - `update_check.py` is git-based: the current version is the checkout's own
   `git describe --tags`, never `ocbox.__version__`, whose editable-install
   metadata stays at whatever was installed first and would keep a required

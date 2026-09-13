@@ -436,27 +436,40 @@ def _compose_global_agents_md(environment: str, facts: list[str]) -> str | None:
     return "\n\n".join(sections) + "\n" if sections else None
 
 
-def _warn_about_other_sandboxes(podman: PodmanClient, slug: str) -> None:
-    """Non-blocking notice about other ocbox sandboxes already running, so a
-    --detach'd one doesn't get forgotten. Fails open exactly like
-    update_check's fetch failures: a podman hiccup here must never block a
-    normal run - only `ocbox list`/`stop`/`attach` themselves should surface
-    a broken podman as an error.
+class SandboxBusyError(Exception):
+    """Raised when a sandbox is already running for this project."""
+
+
+def _check_other_sandboxes(podman: PodmanClient, slug: str) -> None:
+    """Refuses a second sandbox for this project; mentions other projects' in
+    passing.
+
+    Refusing rather than warning, because the second run doesn't merely fail
+    on the container name: both share `run_dir`, so on its way up it unlinks
+    the first's `llm.sock`, and its teardown then rmtree's the whole directory
+    - taking the *healthy* session's sockets, auth file and generated config
+    with it. Stopping here is the only outcome that leaves a running sandbox
+    intact.
+
+    Fails open exactly like update_check's fetch failures: a podman hiccup
+    here must never block a normal run - only `ocbox list`/`stop`/`attach`
+    themselves should surface a broken podman as an error.
     """
     try:
         others = fleet.list_running(podman)
     except PodmanError:
         return
     same_project = [o for o in others if o.slug == slug]
-    other_projects = [o for o in others if o.slug != slug]
     if same_project:
-        print(
-            f"ocbox: {same_project[0].container_name} is already running for this "
-            "project - starting another will collide on the container name.\n"
-            f"  attach: ocbox attach {slug}   stop: ocbox stop {slug}",
-            file=sys.stderr,
+        raise SandboxBusyError(
+            f"{same_project[0].container_name} is already running for this project. "
+            "Starting a second one would break it, not just fail to start - they "
+            "share a run directory.\n"
+            f"  attach: ocbox attach {slug}\n"
+            f"  stop:   ocbox stop {slug}"
         )
-    elif other_projects:
+    other_projects = [o for o in others if o.slug != slug]
+    if other_projects:
         print(
             f"ocbox: {len(other_projects)} other ocbox sandbox(es) running - see `ocbox list`",
             file=sys.stderr,
@@ -498,7 +511,7 @@ def run(
 
     podman = PodmanClient()
     slug = project.project_slug(cwd)
-    _warn_about_other_sandboxes(podman, slug)
+    _check_other_sandboxes(podman, slug)
     run_dir = project.runtime_dir(slug)
     st_dir = project.state_dir(slug)
     state = ProjectState.load(st_dir)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 
 
@@ -123,3 +124,18 @@ class PodmanClient:
             return json.loads(result.stdout) if result.stdout.strip() else []
         except json.JSONDecodeError as exc:
             raise PodmanError(f"could not parse `podman ps` output: {exc}") from exc
+
+    def exec_interactive(self, name: str, cmd: list[str]) -> int:
+        """Runs `cmd` inside a running container, inheriting this process's
+        stdio so the user gets a real terminal, and returns its exit code.
+
+        `-t` only when stdin is a TTY: podman refuses to allocate one
+        otherwise, so asking for it unconditionally would turn a piped or
+        cron-driven `ocbox exec` into an error about the input device instead
+        of just running the command.
+        """
+        flags = ["-it"] if sys.stdin.isatty() else ["-i"]
+        try:
+            return subprocess.call([self.binary, "exec", *flags, name, *cmd])
+        except OSError as exc:
+            raise PodmanError(f"Could not execute `{self.binary}`: {exc}") from exc

@@ -31,6 +31,28 @@ def test_build_without_network(mock_run) -> None:
     assert argv[argv.index("--network") + 1] == "none"
 
 
+@patch("ocbox.podman_client.sys.stdin.isatty", return_value=True)
+@patch("ocbox.podman_client.subprocess.call", return_value=0)
+def test_exec_interactive_allocates_a_tty_when_there_is_one(mock_call, mock_isatty) -> None:
+    assert PodmanClient().exec_interactive("ocbox-x", ["sh"]) == 0
+    assert mock_call.call_args.args[0] == ["podman", "exec", "-it", "ocbox-x", "sh"]
+
+
+@patch("ocbox.podman_client.sys.stdin.isatty", return_value=False)
+@patch("ocbox.podman_client.subprocess.call", return_value=0)
+def test_exec_interactive_skips_the_tty_flag_without_one(mock_call, mock_isatty) -> None:
+    """podman refuses to allocate a TTY when stdin isn't one, which would turn
+    a piped or cron-driven `ocbox exec` into an error instead of a run."""
+    PodmanClient().exec_interactive("ocbox-x", ["echo", "hi"])
+    assert mock_call.call_args.args[0] == ["podman", "exec", "-i", "ocbox-x", "echo", "hi"]
+
+
+@patch("ocbox.podman_client.subprocess.call", side_effect=OSError("no such binary"))
+def test_exec_interactive_reports_a_missing_podman_as_podman_error(mock_call) -> None:
+    with pytest.raises(PodmanError, match="Could not execute"):
+        PodmanClient().exec_interactive("ocbox-x", ["sh"])
+
+
 @patch("ocbox.podman_client.subprocess.run")
 def test_list_containers_builds_ps_json_argv(mock_run) -> None:
     mock_run.return_value = MagicMock(stdout="[]", returncode=0)

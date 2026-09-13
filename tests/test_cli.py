@@ -8,7 +8,7 @@ from ocbox.config import ConfigError
 from ocbox.fleet import SandboxInfo
 from ocbox.podman_client import PodmanError
 from ocbox.preflight import PreflightError
-from ocbox.sandbox import NoSandboxError
+from ocbox.sandbox import NoSandboxError, SandboxBusyError
 from ocbox.update_check import UpdateStatus
 
 
@@ -216,6 +216,19 @@ def test_main_reports_no_sandbox_error_cleanly(mock_run_no_sandbox, capsys) -> N
     exit_code = main(["--no-sandbox"])
     assert exit_code == 1
     assert "ocbox: ~/.config/opencode/agents exists" in capsys.readouterr().err
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", side_effect=SandboxBusyError("ocbox-proj-abc is already running"))
+def test_main_reports_a_busy_sandbox_cleanly(
+    mock_run, mock_config, mock_preflight, capsys
+) -> None:
+    """Refusing a second sandbox for the same project must read like every
+    other ocbox error, not a traceback."""
+    exit_code = main([])
+    assert exit_code == 1
+    assert "ocbox: ocbox-proj-abc is already running" in capsys.readouterr().err
 
 
 @patch("ocbox.cli.run_preflight")

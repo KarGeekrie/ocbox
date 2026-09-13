@@ -149,26 +149,20 @@ def test_exec_shell_reports_missing_target() -> None:
     assert fleet.exec_shell(podman, "ocbox-foo") == 1
 
 
-def test_exec_shell_defaults_to_sh(monkeypatch) -> None:
-    podman = MagicMock(binary="podman")
+def test_exec_shell_defaults_to_sh() -> None:
+    """Goes through PodmanClient rather than subprocess directly, so a missing
+    podman surfaces as ocbox's own error instead of a traceback."""
+    podman = MagicMock()
     podman.container_exists.return_value = True
-    captured = {}
-
-    def fake_call(argv):
-        captured["argv"] = argv
-        return 0
-
-    monkeypatch.setattr(fleet.subprocess, "call", fake_call)
+    podman.exec_interactive.return_value = 0
 
     assert fleet.exec_shell(podman, "ocbox-foo") == 0
-    assert captured["argv"] == ["podman", "exec", "-it", "ocbox-foo", "sh"]
+    podman.exec_interactive.assert_called_once_with("ocbox-foo", ["sh"])
 
 
-def test_exec_shell_uses_a_given_command(monkeypatch) -> None:
-    podman = MagicMock(binary="podman")
+def test_exec_shell_uses_a_given_command() -> None:
+    podman = MagicMock()
     podman.container_exists.return_value = True
-    captured = {}
-    monkeypatch.setattr(fleet.subprocess, "call", lambda argv: captured.setdefault("argv", argv))
 
     fleet.exec_shell(podman, "ocbox-foo", ["bash", "-l"])
-    assert captured["argv"] == ["podman", "exec", "-it", "ocbox-foo", "bash", "-l"]
+    podman.exec_interactive.assert_called_once_with("ocbox-foo", ["bash", "-l"])

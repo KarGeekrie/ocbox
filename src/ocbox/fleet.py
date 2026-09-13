@@ -14,7 +14,6 @@ always the fallback for that.
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -137,4 +136,4 @@ def exec_shell(podman: PodmanClient, target: str, cmd: list[str] | None = None) 
     if not podman.container_exists(name):
         print(f"ocbox: no running sandbox found for {target!r}")
         return 1
-    return subprocess.call([podman.binary, "exec", "-it", name, *(cmd or ["sh"])])
+    return podman.exec_interactive(name, cmd or ["sh"])

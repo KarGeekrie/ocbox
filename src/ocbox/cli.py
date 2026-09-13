@@ -11,6 +11,7 @@ from ocbox.preflight import PreflightError, run_preflight
 from ocbox.sandbox import (
     NoSandboxError,
     OpencodeArgsError,
+    SandboxBusyError,
     check_opencode_args,
     run,
     run_no_sandbox,
@@ -295,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
             detach=args.detach,
             extra_mounts=extra_mounts,
         )
-    except (PodmanError, ConfigError) as exc:
+    except (PodmanError, ConfigError, SandboxBusyError) as exc:
         print(f"ocbox: {exc}", file=sys.stderr)
         return 1
 
