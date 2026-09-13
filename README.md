@@ -17,8 +17,10 @@ UI** in the invoking terminal. Same sandboxing either way:
   nothing is exposed to the host network at all - you're attached directly
   to the container's terminal.
 - **Auth**: **web UI** mode generates a fresh token on every run, printed to your
-  terminal, that gates access to the forwarded web UI. `--tui` mode needs no
-  token - there's no network-exposed UI to protect.
+  terminal, that gates access to the forwarded web UI. The UI is bound to
+  loopback and served over plain HTTP - see "What protects the web UI channel"
+  for what that does and doesn't cover. `--tui` mode needs no token - there's no
+  network-exposed UI to protect.
 
 Only these sandboxed modes protect the host machine. `--no-sandbox` (see
 "Running without a sandbox") runs OpenCode directly on it, with nothing
@@ -594,6 +596,43 @@ two channels through Unix sockets bind-mounted from the host:
 
 No arbitrary destination is ever reachable from inside the sandbox, and no
 container-internal port is ever published directly to the host.
+
+### What protects the web UI channel
+
+Your browser talks to that port over plain HTTP. There is no TLS anywhere in
+the chain, and `opencode serve` has no option to add any. The token ocbox
+prints travels as an ordinary HTTP Basic header on every request - base64, not
+encryption: whatever can read the traffic can read the token.
+
+That matters less than it sounds, because the traffic never touches a network.
+The host-side relay binds `127.0.0.1` and nothing else, so no other machine, on
+your LAN or beyond, can reach the UI at all; the rest of the path is a Unix
+socket (mode 0600, inside a directory only your user can enter) and a loopback
+port within the container. There is no wire to tap.
+
+What the token is actually for: loopback is not private to *you* - every user
+account on the machine can connect to that port. The token is what turns it
+into a locked door. Wrong password or none gets a 401, and it is 192 bits of
+fresh randomness per run, so guessing is not on the table.
+
+**The rule that follows: don't move that port off the machine.** Republishing
+it with `socat`, a reverse proxy, or anything bound to `0.0.0.0` would put the
+token and the whole session in clear text on a real network. To reach the UI
+from another machine, forward it over SSH instead:
+
+```sh
+ssh -L 9000:127.0.0.1:53211 you@the-host   # then open http://127.0.0.1:9000
+```
+
+SSH encrypts that hop, and ocbox still only ever sees a loopback connection.
+
+One residual gap, worth knowing if you pin `--web-port` to a fixed value:
+OpenCode doesn't check the `Host` header, so a malicious page open in your
+browser can *send* requests to the port. It can't read the answers - no CORS
+header is returned for a foreign origin, and HTTP Basic credentials are scoped
+per origin, so a rebound hostname gets a 401 like any other stranger. There's
+nothing to configure here today; it's a defence in depth OpenCode itself would
+have to add.
 
 Curious what's actually been checked against real OpenCode and real rootless
 Podman, versus what's still a best-effort guess? See AGENTS.md's
