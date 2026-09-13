@@ -423,3 +423,31 @@ def test_main_subcommands_reject_arguments_after_a_double_dash() -> None:
     with pytest.raises(SystemExit):
         main(["list", "--", "x"])
 
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_exec_keeps_its_command_when_an_ocbox_option_comes_first(
+    mock_fleet, mock_podman_cls
+) -> None:
+    mock_fleet.exec_shell.return_value = 0
+    assert main(["-y", "exec", "myslug", "--", "ls", "-la"]) == 0
+    mock_fleet.exec_shell.assert_called_once_with(
+        mock_podman_cls.return_value, "myslug", ["ls", "-la"]
+    )
+
+
+def test_main_subcommand_after_an_option_rejects_arguments_after_a_double_dash() -> None:
+    with pytest.raises(SystemExit):
+        main(["-y", "list", "--", "x"])
+
+
+@patch("ocbox.cli.cmd_list")
+@patch("ocbox.cli.run_preflight", side_effect=PreflightError("podman missing"))
+def test_main_still_passes_arguments_after_a_double_dash_to_opencode(
+    mock_preflight, mock_cmd_list
+) -> None:
+    """Without a subcommand, `--` keeps meaning OpenCode passthrough: this `list`
+    is an argument for OpenCode, not ocbox's subcommand."""
+    main(["--tui", "--", "list"])
+    mock_cmd_list.assert_not_called()
+    mock_preflight.assert_called_once()

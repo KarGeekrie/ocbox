@@ -150,19 +150,19 @@ def cmd_list() -> int:
     return 0
 
 
-SUBCOMMANDS = ("list", "stop", "attach", "exec")
-
-
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
-    # The subcommands take no OpenCode passthrough, so their `--` is argparse's.
-    # Splitting it off turned `ocbox exec <target> -- ls -la` - the podman and
-    # kubectl habit - into an interactive sh, with `ls -la` silently dropped.
-    if raw_argv and raw_argv[0] in SUBCOMMANDS:
-        ocbox_argv, opencode_args = raw_argv, []
-    else:
-        ocbox_argv, opencode_args = split_opencode_args(raw_argv)
+    ocbox_argv, opencode_args = split_opencode_args(raw_argv)
     args = build_parser().parse_args(ocbox_argv)
+    if args.command is not None and opencode_args:
+        # The subcommands take no OpenCode passthrough, so their `--` is
+        # argparse's. Split off, `ocbox exec <target> -- ls -la` - the podman and
+        # kubectl habit - opened a bare sh and silently dropped `ls -la`. Parsed
+        # again whole, exec keeps its command and a stray argument after
+        # `list --` is an error. Deciding this after parsing, not from argv[0],
+        # also covers an ocbox option placed first (`ocbox -y exec ...`).
+        args = build_parser().parse_args(raw_argv)
+        opencode_args = []
     cwd = Path.cwd()
 
     if args.command == "list":
