@@ -451,3 +451,12 @@ def test_main_still_passes_arguments_after_a_double_dash_to_opencode(
     main(["--tui", "--", "list"])
     mock_cmd_list.assert_not_called()
     mock_preflight.assert_called_once()
+
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_reports_a_podman_error_from_a_subcommand(mock_fleet, mock_podman_cls, capsys) -> None:
+    mock_fleet.stop_sandbox.side_effect = PodmanError("`podman container exists x` did not answer")
+    assert main(["stop", "myslug"]) == 1
+    assert "did not answer" in capsys.readouterr().err
+

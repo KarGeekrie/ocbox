@@ -218,7 +218,20 @@ def test_attach_refuses_a_forged_host_web_port(tmp_path, monkeypatch, capsys) ->
     podman.container_exists.return_value = True
 
     assert fleet.attach_sandbox(podman, "ocbox-proj-abc") == 1
-    out = capsys.readouterr().out
-    assert "evil" not in out
-    assert "s3cret-token" not in out
+    captured = capsys.readouterr()
+    assert "evil" not in captured.out + captured.err
+    assert "s3cret-token" not in captured.out + captured.err
+
+
+def test_errors_go_to_stderr(capsys) -> None:
+    """So `ocbox stop x > out.txt` in a script still shows why it failed."""
+    podman = MagicMock()
+    podman.container_exists.return_value = False
+
+    assert fleet.stop_sandbox(podman, "ocbox-nope") == 1
+    assert fleet.attach_sandbox(podman, "ocbox-nope") == 1
+    assert fleet.exec_shell(podman, "ocbox-nope") == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("no running sandbox") == 3
 

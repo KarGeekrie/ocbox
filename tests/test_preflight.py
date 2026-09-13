@@ -68,3 +68,13 @@ def test_check_subuid_subgid_present(tmp_path, monkeypatch) -> None:
         mapping = {"/etc/subuid": subuid, "/etc/subgid": subgid}
         mock_path.side_effect = lambda p: mapping.get(p, tmp_path / p.lstrip("/"))
         check_subuid_subgid()  # should not raise
+
+
+@patch(
+    "ocbox.preflight.subprocess.run",
+    side_effect=subprocess.TimeoutExpired(["podman", "info"], 60),
+)
+def test_check_rootless_reports_a_podman_that_hangs(mock_run) -> None:
+    with pytest.raises(PreflightError, match="podman info"):
+        check_rootless()
+

@@ -14,6 +14,7 @@ always the fallback for that.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -104,11 +105,14 @@ def resolve_target(target: str) -> str:
 def stop_sandbox(podman: PodmanClient, target: str) -> int:
     name = resolve_target(target)
     if not podman.container_exists(name):
-        print(f"ocbox: no running sandbox found for {target!r} (looked for {name})")
+        print(
+            f"ocbox: no running sandbox found for {target!r} (looked for {name})",
+            file=sys.stderr,
+        )
         return 1
     podman.stop(name)
     if podman.container_exists(name):
-        print(f"ocbox: {name} did not stop cleanly")
+        print(f"ocbox: {name} did not stop cleanly", file=sys.stderr)
         return 1
     print(f"ocbox: stopped {name}")
     return 0
@@ -121,7 +125,7 @@ def attach_sandbox(podman: PodmanClient, target: str) -> int:
     shell - see exec_shell for that."""
     name = resolve_target(target)
     if not podman.container_exists(name):
-        print(f"ocbox: no running sandbox found for {target!r}")
+        print(f"ocbox: no running sandbox found for {target!r}", file=sys.stderr)
         return 1
     slug = name.removeprefix("ocbox-")
     # Path only: attaching reads a run directory someone else owns and created.
@@ -136,7 +140,8 @@ def attach_sandbox(podman: PodmanClient, target: str) -> int:
     if port is None:
         print(
             f"ocbox: {name} is running but its connection info isn't available "
-            "(tui mode, or it predates this ocbox version)"
+            "(tui mode, or it predates this ocbox version)",
+            file=sys.stderr,
         )
         return 1
     url = auth.build_web_url(port)
@@ -150,6 +155,6 @@ def exec_shell(podman: PodmanClient, target: str, cmd: list[str] | None = None) 
     itself. Inherits this process's stdio for a real TTY."""
     name = resolve_target(target)
     if not podman.container_exists(name):
-        print(f"ocbox: no running sandbox found for {target!r}")
+        print(f"ocbox: no running sandbox found for {target!r}", file=sys.stderr)
         return 1
     return podman.exec_interactive(name, cmd or ["sh"])

@@ -3,18 +3,32 @@
 Kept deliberately dumb: no argument-building smarts live here, that belongs to
 image.py / sandbox.py. This module just knows how to invoke podman and surface
 failures.
+
+Short queries are bounded by QUERY_TIMEOUT. Builds, the container itself and
+`exec` sessions run as long as they need.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 import sys
 from dataclasses import dataclass
 
+# A query - `image exists`, `ps`, `inspect` - answers in well under a second
+# normally. Without a bound, a podman that stops answering hangs every ocbox
+# command along with it, `ocbox list` and `ocbox stop` included.
+QUERY_TIMEOUT = 60
+
 
 class PodmanError(Exception):
     """Raised when a podman invocation fails."""
+
+
+def _timeout_message(binary: str, args: list[str]) -> str:
+    command = " ".join([binary, *args])
+    return f"`{command}` did not answer within {QUERY_TIMEOUT}s - podman looks stuck"
 
 
 @dataclass
@@ -24,8 +38,14 @@ class PodmanClient:
     def run_capture(self, args: list[str]) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
-                [self.binary, *args], capture_output=True, text=True, check=True
+                [self.binary, *args],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=QUERY_TIMEOUT,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise PodmanError(_timeout_message(self.binary, args)) from exc
         except subprocess.CalledProcessError as exc:
             raise PodmanError(
                 f"`{self.binary} {' '.join(args)}` failed (exit {exc.returncode}):\n{exc.stderr}"
@@ -39,26 +59,29 @@ class PodmanClient:
         except OSError as exc:
             raise PodmanError(f"Could not execute `{self.binary}`: {exc}") from exc
 
+    def _query(self, args: list[str]) -> subprocess.CompletedProcess[str]:
+        """A short call whose exit code is the answer, bounded by QUERY_TIMEOUT."""
+        try:
+            return subprocess.run(
+                [self.binary, *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=QUERY_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise PodmanError(_timeout_message(self.binary, args)) from exc
+        except OSError as exc:
+            raise PodmanError(f"Could not execute `{self.binary}`: {exc}") from exc
+
     def image_exists(self, tag: str) -> bool:
-        result = subprocess.run(
-            [self.binary, "image", "exists", tag], capture_output=True, text=True, check=False
-        )
-        return result.returncode == 0
+        return self._query(["image", "exists", tag]).returncode == 0
 
     def image_label(self, tag: str, label: str) -> str | None:
         """Returns the value of `label` on `tag`, or None if the image or
         label doesn't exist."""
-        result = subprocess.run(
-            [
-                self.binary,
-                "inspect",
-                "--format",
-                f'{{{{ index .Config.Labels "{label}" }}}}',
-                tag,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        result = self._query(
+            ["inspect", "--format", f'{{{{ index .Config.Labels "{label}" }}}}', tag]
         )
         if result.returncode != 0:
             return None
@@ -92,18 +115,19 @@ class PodmanClient:
             raise PodmanError(f"podman build failed for tag {tag}:\n{exc.stderr}") from exc
 
     def stop(self, name: str, timeout: int = 10) -> None:
-        subprocess.run(
-            [self.binary, "stop", "-t", str(timeout), name],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        """Best effort, like before: callers check afterwards whether the
+        container is gone. Bounded too, so a stuck podman can't hang a teardown."""
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            subprocess.run(
+                [self.binary, "stop", "-t", str(timeout), name],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout + QUERY_TIMEOUT,
+            )
 
     def container_exists(self, name: str) -> bool:
-        result = subprocess.run(
-            [self.binary, "container", "exists", name], capture_output=True, text=True, check=False
-        )
-        return result.returncode == 0
+        return self._query(["container", "exists", name]).returncode == 0
 
     def list_containers(self, *, label: str | None = None) -> list[dict]:
         """Running containers, as `podman ps` reports them - the raw dicts
