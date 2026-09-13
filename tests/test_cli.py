@@ -404,3 +404,22 @@ def test_main_dispatches_exec_subcommand_with_a_command(mock_fleet, mock_podman_
     mock_fleet.exec_shell.assert_called_once_with(
         mock_podman_cls.return_value, "myslug", ["bash", "-l"]
     )
+
+
+@patch("ocbox.cli.PodmanClient")
+@patch("ocbox.cli.fleet")
+def test_main_exec_keeps_the_command_after_a_double_dash(mock_fleet, mock_podman_cls) -> None:
+    """`ocbox exec <target> -- ls -la` is the podman/kubectl habit. The `--` used
+    to be taken as OpenCode passthrough, dropping the command for a bare sh."""
+    mock_fleet.exec_shell.return_value = 0
+    assert main(["exec", "myslug", "--", "ls", "-la"]) == 0
+    mock_fleet.exec_shell.assert_called_once_with(
+        mock_podman_cls.return_value, "myslug", ["ls", "-la"]
+    )
+
+
+def test_main_subcommands_reject_arguments_after_a_double_dash() -> None:
+    """Silently ignored before; nothing can be passed through to OpenCode there."""
+    with pytest.raises(SystemExit):
+        main(["list", "--", "x"])
+

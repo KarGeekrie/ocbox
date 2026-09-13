@@ -150,10 +150,18 @@ def cmd_list() -> int:
     return 0
 
 
+SUBCOMMANDS = ("list", "stop", "attach", "exec")
+
+
 def main(argv: list[str] | None = None) -> int:
-    ocbox_argv, opencode_args = split_opencode_args(
-        list(argv) if argv is not None else sys.argv[1:]
-    )
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    # The subcommands take no OpenCode passthrough, so their `--` is argparse's.
+    # Splitting it off turned `ocbox exec <target> -- ls -la` - the podman and
+    # kubectl habit - into an interactive sh, with `ls -la` silently dropped.
+    if raw_argv and raw_argv[0] in SUBCOMMANDS:
+        ocbox_argv, opencode_args = raw_argv, []
+    else:
+        ocbox_argv, opencode_args = split_opencode_args(raw_argv)
     args = build_parser().parse_args(ocbox_argv)
     cwd = Path.cwd()
 
