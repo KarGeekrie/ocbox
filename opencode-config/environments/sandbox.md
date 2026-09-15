@@ -18,8 +18,10 @@ only the user's project and the tools listed below.
   that isn't listed, say which package is missing and ask the user to restart
   with `ocbox --apt <package>` or `ocbox --uv <package>`, rather than trying to
   install it yourself.
-- Everything outside the mounted project directories - including the rest of
-  this container's filesystem - is thrown away when the sandbox exits. Nothing
-  written there needs redirecting or cleaning up for the user's sake.
+- Your home directory, `/home/ocbox`, is kept from one session of this project
+  to the next: OpenCode's session history lives there, and so does anything you
+  write there, so don't treat it as scratch space. `/tmp` is discarded when the
+  sandbox exits, and most of the rest of the container's filesystem is
+  read-only.
 - Profilers and debuggers have to launch the program they inspect. Attaching to
   an already-running process is not permitted here.

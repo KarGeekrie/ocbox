@@ -410,7 +410,9 @@ def _sandbox_facts(
         "- Extra system packages: " + (", ".join(apt_pkgs) if apt_pkgs else "none") + ".",
         "- Extra Python packages (uv): " + (", ".join(uv_pkgs) if uv_pkgs else "none") + ".",
         "- Project directories, where changes are real: " + ", ".join(project_dirs) + ".",
-        "- `/tmp` is scratch space, and most of the rest of the filesystem is read-only.",
+        "- `/tmp` is scratch space, discarded when the sandbox exits.",
+        "- `/home/ocbox` is kept between this project's sessions; most of the rest of the "
+        "filesystem is read-only.",
     ]
 
 
