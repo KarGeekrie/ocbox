@@ -60,6 +60,14 @@ EXTRA_MOUNTS_ROOT = "/mnt"
 # is told what the container actually gets rather than what someone remembered.
 SANDBOX_NETWORK = "none"
 
+# Where `uv run`/`uv sync` keep the project environment inside a sandbox, set as
+# UV_PROJECT_ENVIRONMENT. Not the project's own .venv: one made on the host
+# links to an interpreter the container doesn't have, and uv, finding it broken,
+# deleted and recreated it - emptying the user's venv, since nothing can be
+# reinstalled without network. Verified with a uv-managed host venv. It sits in
+# the per-project home volume, so it persists like the rest of the home.
+SANDBOX_UV_PROJECT_ENVIRONMENT = "/home/ocbox/venv"
+
 # The loopback port the LLM-egress relay binds *inside* the container. Fixed
 # rather than configurable: OpenCode reaches it as http://127.0.0.1:<port>, and
 # entrypoint.sh binds it. It must differ from the container web port (see run()).
@@ -207,6 +215,8 @@ def build_podman_run_argv(plan: RunPlan) -> list[str]:
         "XDG_DATA_HOME=/home/ocbox/.local/share",
         "-e",
         "XDG_STATE_HOME=/home/ocbox/.local/state",
+        "-e",
+        f"UV_PROJECT_ENVIRONMENT={SANDBOX_UV_PROJECT_ENVIRONMENT}",
     ]
     if plan.memory_limit:
         argv += ["--memory", plan.memory_limit]
@@ -409,6 +419,8 @@ def _sandbox_facts(
         f"- Base system: {base_os}, with python3, uv, curl and ripgrep (`rg`).",
         "- Extra system packages: " + (", ".join(apt_pkgs) if apt_pkgs else "none") + ".",
         "- Extra Python packages (uv): " + (", ".join(uv_pkgs) if uv_pkgs else "none") + ".",
+        "- Python: use the image's `python3`; the packages above are installed into it. "
+        f"`uv run`/`uv sync` use `{SANDBOX_UV_PROJECT_ENVIRONMENT}`, outside the project.",
         "- Project directories, where changes are real: " + ", ".join(project_dirs) + ".",
         "- `/tmp` is scratch space, discarded when the sandbox exits.",
         "- `/home/ocbox` is kept between this project's sessions; most of the rest of the "

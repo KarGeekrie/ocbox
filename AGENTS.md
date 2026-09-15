@@ -300,6 +300,24 @@ opencode 1.18.29 and its published schema:
 
   `tests/test_opencode_permissions.py` replays the evaluation on
   `opencode.jsonc`.
+- **A host virtual environment in the project breaks in a sandbox, and uv used
+  to destroy it**, checked with projects whose `.venv` was made on the host:
+  - A venv from `python3 -m venv` with the host's `/usr/bin/python3` ran
+    through `.venv/bin/python` only because host and image share Python
+    3.12.3. Its scripts and `activate` point at the host path, not
+    `/workspace`, and fail.
+  - A venv from `uv sync` links to uv's managed Python under the host's home,
+    absent in the container. `uv run` or `uv sync` in the sandbox printed
+    "Removed virtual environment at: .venv", recreated it with the container's
+    Python, then failed to download the dependencies, leaving the host with an
+    empty venv.
+
+  The sandbox now sets `UV_PROJECT_ENVIRONMENT`
+  (`sandbox.SANDBOX_UV_PROJECT_ENVIRONMENT`), and the real OpenCode suite
+  checks that an agent's `uv sync` leaves a broken host `.venv` untouched. A
+  venv created inside the sandbox stays in the project after the container
+  stops. `python3 -m venv` itself fails half-way in the image, which has no
+  `ensurepip`.
 - **Open: `opencode run` on the host can stall right after `init`**, before
   the session is created. No request reaches the LLM, and the process sits idle:
   no CPU over 5 s, every thread waiting in `epoll_wait` or on a futex, no TCP
