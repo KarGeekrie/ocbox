@@ -107,8 +107,8 @@ def test_argv_includes_resource_limits_when_set() -> None:
 
 
 def test_generate_opencode_config_uses_the_given_base_url() -> None:
-    """base_url is the relay endpoint in sandbox mode, or opencode.jsonc's own
-    baseURL in --no-sandbox mode - either way it's just passed through."""
+    """base_url is the relay endpoint the sandboxed OpenCode talks to - passed
+    through as given."""
     cfg = _generate_opencode_config("http://127.0.0.1:8081/v1")
     assert cfg["provider"]["local"]["options"]["baseURL"] == "http://127.0.0.1:8081/v1"
 

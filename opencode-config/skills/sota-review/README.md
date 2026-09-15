@@ -84,8 +84,9 @@ The code-review report flagged <ID> in <path/to/file> L<N> with [SOTA-CHECK]
 
 Ships as part of ocbox's team configuration — nothing to install by hand.
 `opencode-config/skills/sota-review/` is bind-mounted read-only into every
-sandbox (and linked into the config directory under `--no-sandbox`) as
-`~/.config/opencode/skills/sota-review`; see the main
+sandbox as `~/.config/opencode/skills/sota-review`. Under `--no-sandbox` it is
+linked into the config directory ocbox assembles instead,
+`.ocbox/no-sandbox/opencode-config/skills/sota-review`; see the main
 `opencode-config/skills/README.md` for how skill loading works.
 
 ## Domain coverage

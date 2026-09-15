@@ -71,3 +71,23 @@ def test_interactive_prompt_blank_input_uses_defaults() -> None:
         apt, uv = prompt_extra_packages(_cfg(), non_interactive=False)
     assert apt == ["git", "vim"]
     assert uv == ["ruff"]
+
+
+def test_interactive_prompt_says_what_a_blank_answer_keeps() -> None:
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", side_effect=["", ""]) as mock_input,
+    ):
+        prompt_extra_packages(_cfg(), non_interactive=False)
+    apt_prompt, uv_prompt = (call.args[0] for call in mock_input.call_args_list)
+    assert "git vim" in apt_prompt
+    assert "ruff" in uv_prompt
+
+
+def test_interactive_prompt_says_none_when_there_is_no_default() -> None:
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", side_effect=["", ""]) as mock_input,
+    ):
+        prompt_extra_packages(Config(), non_interactive=False)
+    assert all("blank keeps: none" in call.args[0] for call in mock_input.call_args_list)

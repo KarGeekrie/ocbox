@@ -53,8 +53,9 @@ so no agent file states something that is only true in one mode.
 
 ## Restricting what an agent can do
 
-`permission` gates individual tools with `allow`, `ask` or `deny`, and covers
-`edit` (all writes, patches and modifications), `bash` and `webfetch`. The
+`permission` gates individual tools with `allow`, `ask` or `deny`. Among others,
+it covers `edit` (all writes, patches and modifications), `bash`, `webfetch`,
+`read`, `skill` and `external_directory`, the same keys as in `opencode.jsonc`. The
 alternative, `tools: {edit: false}`, removes a tool outright.
 
 **Denying `edit` alone does not make an agent read-only.** The default is
