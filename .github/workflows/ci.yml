@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Weekly as well: the sandbox image installs the current OpenCode, so an
+  # OpenCode release can break the "Real OpenCode" job without any commit here.
+  schedule:
+    - cron: "0 5 * * 1"
 
 permissions:
   contents: read
@@ -45,3 +49,19 @@ jobs:
       - run: pytest tests/integration -v
         env:
           RUN_PODMAN_INTEGRATION: "1"
+
+  opencode:
+    name: Real OpenCode (sandbox image + stub LLM)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/integration/test_opencode_real.py -v
+        env:
+          RUN_OPENCODE_INTEGRATION: "1"
