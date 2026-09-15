@@ -31,6 +31,7 @@ signal.
 ```sh
 pytest                                              # unit tests - fast, no podman needed
 RUN_PODMAN_INTEGRATION=1 pytest tests/integration    # real rootless Podman required
+RUN_OPENCODE_INTEGRATION=1 pytest tests/integration/test_opencode_real.py  # real OpenCode, real image
 ruff check src tests                                 # lint
 ```
 
@@ -39,6 +40,17 @@ change done. Run the integration suite too whenever you touch `sandbox.py`,
 `network.py`, `podman_client.py`, `image.py`, or `data/{relay.py,
 entrypoint.sh,Containerfile}` - those are exactly the pieces the mocked unit
 tests can't fully validate (real namespace/relay/auth behavior).
+
+Run the real OpenCode suite (`RUN_OPENCODE_INTEGRATION=1`) whenever you touch
+what ocbox hands OpenCode: `opencode-config/`, the mount paths or generated
+config in `sandbox.py`, the `--no-sandbox` config directory, or an image's
+Containerfile. It builds the real sandbox image, so it needs network and takes
+minutes on a first run. It drives the real `ocbox` CLI against a stub LLM
+(`tests/integration/stub_llm.py`) and checks that OpenCode discovers the
+agents and skills, merges the configs, sends the composed `AGENTS.md`, and
+enforces the permissions in real tool calls. Unlike `test_opencode_permissions.py`,
+which replays OpenCode's evaluation, this suite is the one that notices when an
+OpenCode release changes behaviour. CI runs it on pull requests and weekly.
 
 If Podman isn't installed and you need to validate against it: `apt-get
 install -y podman` (or `dnf install -y podman`) works standalone, no other
