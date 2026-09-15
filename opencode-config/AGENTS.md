@@ -28,9 +28,13 @@ alternative rather than improvising a workaround.
 
 ## Python
 
-- Never run Python outside a virtual environment. If the project already has
-  one (`.venv/`, `venv/`), activate it. If it doesn't, ask before creating
-  one rather than installing into the system interpreter.
+- On the user's machine (`ocbox --no-sandbox`), never run Python outside a
+  virtual environment. If the project already has one (`.venv/`, `venv/`),
+  activate it. If it doesn't, ask before creating one rather than installing
+  into the system interpreter.
+- In an ocbox sandbox, use the image's `python3`, which holds the packages the
+  sandbox was built with; the environment section explains why a virtual
+  environment doesn't work there.
 - Prefer `uv` over `pip` when both are available - it's faster and resolves
   deterministically. Fall back to `pip` when the project is already built
   around it.

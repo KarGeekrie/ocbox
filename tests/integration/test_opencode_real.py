@@ -34,7 +34,7 @@ from pathlib import Path
 import pytest
 
 from ocbox import jsonc, project
-from ocbox.sandbox import CONTAINER_LLM_PORT, SKILLS_DIR_MOUNT
+from ocbox.sandbox import CONTAINER_LLM_PORT, SANDBOX_UV_PROJECT_ENVIRONMENT, SKILLS_DIR_MOUNT
 
 from .stub_llm import StubLLM
 
@@ -290,6 +290,45 @@ def test_build_session_uses_a_mount_and_stays_out_of_the_rest(tmp_path) -> None:
     assert (extra / "created.txt").read_text() == "x"
     assert "/workspace/inside.txt" in results[2], "glob failed - is ripgrep in the image?"
     assert "<content>" not in results[3], "/etc/hostname was readable"
+
+
+def test_uv_in_a_sandbox_leaves_the_projects_host_venv_alone(tmp_path) -> None:
+    """A venv made on the host links to an interpreter the sandbox doesn't have.
+    uv, finding it broken, used to delete and recreate it - emptying the user's
+    venv, since nothing can be reinstalled without network. ocbox points uv at
+    an environment outside the project instead."""
+    host_python = "/nonexistent/uv-managed/bin/python3.13"
+    scenario = [
+        {
+            "name": "bash",
+            "arguments": {
+                "command": "uv sync && uv run python -c 'import sys; print(sys.prefix)'",
+                "description": "Sync the project and show which environment runs it",
+            },
+        }
+    ]
+    with _project(tmp_path / "project") as path, StubLLM(scenario) as llm:
+        (path / "pyproject.toml").write_text(
+            '[project]\nname = "uvcheck"\nversion = "0"\nrequires-python = ">=3.8"\n'
+            "dependencies = []\n"
+        )
+        venv = path / ".venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").symlink_to(host_python)
+        (venv / "pyvenv.cfg").write_text(f"home = {Path(host_python).parent}\n")
+        (venv / "made-on-the-host").write_text("")
+        config = _config_pointing_at(llm, tmp_path)
+        _ocbox(
+            path, "--tui", "--yes", "--opencode-config", str(config), "--",
+            "run", "--model", f"local/{_first_model()}", "go",
+            timeout=FIRST_RUN_TIMEOUT,
+        )
+
+        requests = llm.tool_requests()
+        assert requests, "OpenCode never reached the LLM"
+        assert SANDBOX_UV_PROJECT_ENVIRONMENT in llm.tool_results(requests[-1])[0]
+        assert (venv / "made-on-the-host").exists(), "uv replaced the host's .venv"
+        assert os.readlink(venv / "bin" / "python") == host_python
 
 
 # ---- --no-sandbox -----------------------------------------------------------------
