@@ -35,10 +35,11 @@ This directory holds the team's additional agents: `chat`, for talking through
 code without changing it, and `review`, for finding bugs in a change. Both are
 `mode: primary`, so Tab cycles through them next to OpenCode's `build` and
 `plan` - reviewing is meant to be one keystroke away, not buried behind a
-subagent call. `review` is read-only by design (see below) and reaches for the
-`code-review`/`sota-review` skills in `../skills/` for anything beyond a small
-diff; applying the fixes those skills can propose needs `build` instead, since
-`review` can't edit.
+subagent call. `review` can't change code by design (see below): the only file
+it may write is `review_report.md`, the report `code-review` produces. It
+reaches for the `code-review`/`sota-review` skills in `../skills/` for anything
+beyond a small diff; applying the fixes those skills can propose needs `build`
+instead.
 
 `build` and `plan` are deliberately **not** here. They are OpenCode's own
 built-in primary agents, used exactly as OpenCode ships them. A `build.md` or
@@ -59,8 +60,16 @@ alternative, `tools: {edit: false}`, removes a tool outright.
 **Denying `edit` alone does not make an agent read-only.** The default is
 `*: allow`, so an agent that cannot use the edit tool can still rewrite files
 through `bash` - `echo x > file` is not an edit as far as permissions are
-concerned. `chat` therefore denies both; `review` denies `edit` and sets
-`bash: ask`, so `git diff` stays available under the user's approval.
+concerned. `chat` therefore denies both; `review` denies `edit` except for its
+report and sets `bash: ask`, so `git diff` stays available under the user's
+approval.
+
+`review`'s exception is written twice, as `review_report.md` and
+`*/review_report.md`. OpenCode matches `edit` patterns against the path relative
+to the project's worktree. In a git repository that is the file name itself, but
+in a sandboxed project that isn't one it is `workspace/review_report.md`. The
+second form also lets `review` write a file of that name in a subdirectory -
+nothing else.
 
 Both deny `webfetch`: they work from the code in front of them, and in a
 sandbox, which has no network, a fetch could only fail.

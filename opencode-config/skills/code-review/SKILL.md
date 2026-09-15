@@ -19,8 +19,8 @@ One structured pass. Language-specific checklists. Fixes applied safely.
 
 **In ocbox**: this skill only decides *how* to review — scope and checklists.
 Whether it may also *apply* fixes depends on which agent runs it: `review`
-denies the edit tool (read-only, so Step 4 below is skipped and every finding
-is reported instead), `build` has full edit/bash access and can carry Step 4
+may write only `review_report.md` (so Step 3 works, Step 4 below is skipped and
+every finding is reported instead), `build` has full edit/bash access and can carry Step 4
 through. See `launch-review.md` for the exact prompts, and
 `opencode-config/agents/review.md` for why the split exists.
 
@@ -413,10 +413,10 @@ Shows the review was not superficial.>
 
 ## Step 4 — Apply fixes
 
-Only reachable when the running agent can edit — see the note at the top of
+Only reachable when the running agent can edit the code — see the note at the top of
 this file. Skip this step entirely (leave every `Automatable: yes/partial`
 finding unapplied in the report) when it cannot; that is not a failure, it is
-`review`'s normal, read-only mode.
+`review`'s normal, report-only mode.
 
 For every finding where `Automatable: yes` or `partial`:
 

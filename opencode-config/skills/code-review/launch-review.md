@@ -15,8 +15,8 @@
 
 > **Fix mode in ocbox**: prompts below say "apply automatable fixes" or "do
 > NOT apply fixes". Whether that request can actually be honored depends on
-> which agent you're running it from — `review` is read-only (edit denied)
-> and always reports instead of fixing, however the prompt is worded; `build`
+> which agent you're running it from — `review` may write only
+> `review_report.md` and always reports instead of fixing, however the prompt is worded; `build`
 > can do either. See `opencode-config/agents/review.md`.
 
 ---

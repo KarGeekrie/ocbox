@@ -48,6 +48,7 @@ CONFIG_DIR = REPO / "opencode-config"
 TEAM_CONFIG = CONFIG_DIR / "opencode.jsonc"
 FIRST_RUN_TIMEOUT = 45 * 60  # builds the real sandbox image
 RUN_TIMEOUT = 5 * 60
+REPORT = "review_report.md"  # the one file the review agent may write
 
 
 def _ocbox(project_dir: Path, *args: str, timeout: int = RUN_TIMEOUT) -> str:
@@ -204,6 +205,8 @@ def test_sandbox_merges_the_team_config_with_the_generated_relay_endpoint(sandbo
         ("plan", "edit", "src/app.py", "deny"),
         ("plan", "edit", ".opencode/plans/1-plan.md", "allow"),
         ("review", "edit", "src/app.py", "deny"),
+        ("review", "edit", "review_report.md", "allow"),
+        ("review", "edit", "workspace/review_report.md", "allow"),
         ("review", "webfetch", "https://example.com", "deny"),
         ("chat", "edit", "src/app.py", "deny"),
         ("chat", "bash", "ls", "deny"),
@@ -226,6 +229,7 @@ def test_review_session_gets_the_composed_prompt_and_the_skill(sandbox, tmp_path
     scenario = [
         {"name": "skill", "arguments": {"name": "code-review"}},
         {"name": "read", "arguments": {"filePath": f"{SKILLS_DIR_MOUNT}/{checklist}"}},
+        {"name": "write", "arguments": {"filePath": f"/workspace/{REPORT}", "content": "# R"}},
         {"name": "write", "arguments": {"filePath": "/workspace/written.txt", "content": "x"}},
     ]
     with StubLLM(scenario) as llm:
@@ -243,6 +247,7 @@ def test_review_session_gets_the_composed_prompt_and_the_skill(sandbox, tmp_path
     for origin, marker in [
         ("environments/sandbox.md", environment),
         ("the sandbox facts", "- Network: none."),
+        ("the home directory fact", "`/home/ocbox` is kept between this project's sessions"),
         ("the team AGENTS.md", team_rules),
         ("the project AGENTS.md", "Marker: ocbox-project-agents-md"),
         ("agents/review.md", "You review code in the user's project."),
@@ -250,13 +255,13 @@ def test_review_session_gets_the_composed_prompt_and_the_skill(sandbox, tmp_path
         assert marker in system, f"system prompt lacks {origin}"
 
     tools = llm.tool_names(requests[0])
-    assert {"skill", "read"} <= tools
-    assert not tools & {"write", "edit"}, "review was offered an editing tool"
+    assert {"skill", "read", "write"} <= tools, "review needs write for its report"
 
     results = llm.tool_results(requests[-1])
     assert '<skill_content name="code-review">' in results[0]
     assert (CONFIG_DIR / "skills" / checklist).read_text().splitlines()[0] in results[1]
-    assert not (path / "written.txt").exists()
+    assert (path / "review_report.md").read_text() == "# R", "review couldn't write its report"
+    assert not (path / "written.txt").exists(), "review wrote a file other than its report"
 
 
 def test_build_session_uses_a_mount_and_stays_out_of_the_rest(tmp_path) -> None:
