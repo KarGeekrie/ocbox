@@ -71,12 +71,16 @@ Step 5  print summary
 
 Ships as part of ocbox's team configuration — nothing to install by hand.
 `opencode-config/skills/code-review/` is bind-mounted read-only into every
-sandbox (and linked into the config directory under `--no-sandbox`) as
-`~/.config/opencode/skills/code-review`; see the main
+sandbox as `~/.config/opencode/skills/code-review`. Under `--no-sandbox` it is
+linked into the config directory ocbox assembles instead,
+`.ocbox/no-sandbox/opencode-config/skills/code-review`; see the main
 `opencode-config/skills/README.md` for how skill loading works.
 
-**Optional — GitLab MR review mode only**: needs the `glab` CLI on the host,
-authenticated against your own GitLab instance:
+**Optional — GitLab MR and Tuleap PR review modes**: both reach a server, so
+they run under `ocbox --no-sandbox` only, since a sandbox has no network. Tuleap
+reads its access key from the `TULEAP_ACCESS_KEY` environment variable - see
+`launch-review.md`. GitLab needs the `glab` CLI on the host, authenticated
+against your own GitLab instance:
 
 ```bash
 glab auth login --hostname <your-gitlab-host>

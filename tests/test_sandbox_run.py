@@ -357,3 +357,18 @@ def test_run_mounts_a_sandbox_agents_md_listing_what_is_installed(
     assert "Extra system packages: git." in text
     assert "Network: none" in text
     assert "# Environment: your machine" not in text
+
+
+def test_run_asks_about_packages_before_building_the_base_image(tmp_path, mocked_run_env) -> None:
+    """The base image build can take minutes; the question shouldn't wait behind it."""
+    order = []
+    mocked_run_env["image"].ensure_base_image.side_effect = lambda *a, **k: order.append("base")
+
+    def prompt(*args, **kwargs):
+        order.append("prompt")
+        return [], []
+
+    with patch("ocbox.sandbox.prompt_extra_packages", side_effect=prompt):
+        sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True)
+
+    assert order == ["prompt", "base"]
