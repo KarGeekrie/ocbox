@@ -263,6 +263,29 @@ team's rules, which still apply to every other path.
 `--no-sandbox` doesn't take `--mount`: OpenCode sees the host's filesystem
 directly, and the team's `external_directory` rules apply to it as written.
 
+### Python projects and virtual environments
+
+A sandbox uses its image's Python: the packages you add with `--uv` or
+`EXTRA_UV_DEFAULT` are installed into its `python3`, and that is what the agent
+runs.
+
+A virtual environment you already have in the project isn't usable from inside
+the sandbox. It holds absolute paths from your machine - its interpreter link,
+`activate`, and the first line of every script in `bin/` - while the project is
+at `/workspace` in the container. One made by `uv` with a Python it manages is
+entirely broken there. The agent is told so, and told to leave it alone.
+
+`uv run` and `uv sync` inside the sandbox don't use the project's `.venv`
+either: ocbox sets `UV_PROJECT_ENVIRONMENT` to `/home/ocbox/venv`, in the
+project's home volume. Without that, uv found the host's venv broken, deleted
+it and recreated it - and with no network to reinstall anything, left an empty
+venv in your project.
+
+A virtual environment created inside the sandbox, in the project directory, is
+not thrown away with the container: the project is your real directory. It
+points at the container's Python, so it only works on your machine if your
+Python happens to sit at the same path.
+
 ### Terminal UI instead of the web UI
 
 Prefer working in the terminal? Pass `--tui`:
@@ -493,15 +516,19 @@ How the two layers interact:
 - **After editing either file, start a new session** so the change is
   certainly in effect.
 
-The team file currently carries one rule. It also shows the shape to aim for -
-short, imperative, and explicit about the awkward case:
+The team file's rules show the shape to aim for - short, imperative, and
+explicit about the awkward case. Its Python section, for instance:
 
 ```markdown
 ## Python
 
-Never run Python outside a virtual environment. If the project already has
-one (`.venv/`, `venv/`), activate it. If it doesn't, ask before creating
-one rather than installing into the system interpreter.
+- On the user's machine (`ocbox --no-sandbox`), never run Python outside a
+  virtual environment. If the project already has one (`.venv/`, `venv/`),
+  activate it. If it doesn't, ask before creating one rather than installing
+  into the system interpreter.
+- In an ocbox sandbox, use the image's `python3`, which holds the packages the
+  sandbox was built with; the environment section explains why a virtual
+  environment doesn't work there.
 ```
 
 One thing looks like an alternative and isn't: OpenCode's `instructions`

@@ -462,3 +462,18 @@ def test_compose_global_agents_md_uses_only_the_requested_environment(
 def test_compose_global_agents_md_is_none_when_there_is_nothing(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(sandbox.image, "repo_config_dir", lambda: tmp_path)
     assert sandbox._compose_global_agents_md("sandbox", []) is None
+
+
+def test_argv_points_uv_at_an_environment_outside_the_project() -> None:
+    """A host .venv in the project links to an interpreter the container lacks;
+    uv would delete and recreate it, emptying the user's venv."""
+    argv = build_podman_run_argv(_plan())
+    assert f"UV_PROJECT_ENVIRONMENT={sandbox.SANDBOX_UV_PROJECT_ENVIRONMENT}" in argv
+    assert not sandbox.SANDBOX_UV_PROJECT_ENVIRONMENT.startswith("/workspace")
+
+
+def test_sandbox_facts_say_which_python_to_use() -> None:
+    facts = "\n".join(sandbox._sandbox_facts("ubuntu", [], [], []))
+    assert "`python3`" in facts
+    assert sandbox.SANDBOX_UV_PROJECT_ENVIRONMENT in facts
+

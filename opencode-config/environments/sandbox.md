@@ -18,6 +18,15 @@ only the user's project and the tools listed below.
   that isn't listed, say which package is missing and ask the user to restart
   with `ocbox --apt <package>` or `ocbox --uv <package>`, rather than trying to
   install it yourself.
+- Python: run the image's `python3` directly - the packages the sandbox was
+  built with are installed into it. A virtual environment already in the
+  project was made on the user's machine: its interpreter, `activate` script
+  and entry points point at paths this container doesn't have, so don't
+  activate, repair or rebuild it. Don't create a new one in the project either:
+  it would stay in the user's directory, pointing at this container's Python.
+  `uv run` and `uv sync` use a separate environment outside the project (see
+  the facts below), so they leave the project's `.venv` alone - but they still
+  can't download anything.
 - Your home directory, `/home/ocbox`, is kept from one session of this project
   to the next: OpenCode's session history lives there, and so does anything you
   write there, so don't treat it as scratch space. `/tmp` is discarded when the
