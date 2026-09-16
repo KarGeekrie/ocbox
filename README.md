@@ -7,8 +7,11 @@ project directory, with no root privileges required - either through its
 **web UI** (default) or, with `--tui`, directly as an **interactive terminal
 UI** in the invoking terminal. Same sandboxing either way:
 
-- **Filesystem**: only the project directory you run `ocbox` from is mounted
-  into the sandbox (read-write). No other host path is visible from inside.
+- **Filesystem**: the project directory you run `ocbox` from is mounted
+  read-write, along with any `--mount` directory. Besides those, the sandbox
+  sees only what ocbox hands it: the team's `opencode-config/`, read-only, and a
+  per-run directory for the relay sockets and generated config. Nothing else
+  from the host - your home, other projects - is visible from inside.
 - **Network**: the container gets `--network=none` - no network device at
   all except loopback. The only thing it can reach is a local LLM server you
   configure (see "How the isolation works" below). In **web UI** mode, a pair of
@@ -218,7 +221,8 @@ ocbox
 ```
 
 You'll be asked whether to add any extra `apt` or `uv pip` packages to the
-sandbox (blank to skip). ocbox then builds/reuses the sandbox image, starts
+sandbox - a blank answer keeps the defaults from `conf.py`, none unless you set
+some. ocbox then builds/reuses the sandbox image, starts
 the container, and prints something like:
 
 ```
@@ -585,7 +589,8 @@ something out in a single run without touching it.
 
 Agents and skills are found because of *where* they are mounted - OpenCode's
 own global config directory - rather than through any config key, so the
-`opencode.json` ocbox generates holds nothing but the provider endpoint:
+`opencode.json` ocbox generates holds only what depends on the run - the provider
+endpoint, and a permission for each `--mount`:
 
 - **Agents**: one `<name>.md` per agent, with `description`/`mode`
   frontmatter and the body as its prompt. Mounted at
@@ -608,6 +613,14 @@ standalone or as a follow-up on a `code-review` finding tagged
 `[SOTA-CHECK]`). Both only report findings unless the agent running them can
 edit code - see `opencode-config/skills/code-review/README.md` for how
 that split works with `review` vs `build`.
+
+`code-review`'s GitLab MR and Tuleap PR modes talk to those servers - `glab` for
+GitLab, `curl` for Tuleap - so they only work under `--no-sandbox`: a sandbox
+has no network, and no `glab`. Tuleap's access key comes from the
+`TULEAP_ACCESS_KEY` environment variable, exported in the shell you start
+`ocbox --no-sandbox` from. Don't write it into a file in the project, where it
+is one `git add` away from being committed. See
+`opencode-config/skills/code-review/launch-review.md`.
 
 ocbox adds two agents next to OpenCode's built-in `build` and `plan`, which it
 leaves exactly as OpenCode ships them. Both are **primary agents**: Tab cycles
@@ -791,7 +804,7 @@ rest either can't live there or isn't written by ocbox:
 | Where | Written by | What |
 |---|---|---|
 | `~/.local/share/containers/` | Podman, for ocbox | The sandbox images, and one `ocbox-home-<project>` volume per project - the container's home directory, kept between runs. Podman decides where its storage lives. |
-| `$XDG_RUNTIME_DIR/ocbox/<project>/`, usually `/run/user/<uid>/` | ocbox, sandboxed modes | Per-run files: the relay sockets, the generated `opencode.json` and `AGENTS.md`, the web UI password, the `--detach` log. Private to your user. |
+| `$XDG_RUNTIME_DIR/ocbox/<project>/`, usually under `/run/user/<uid>/`; `/tmp/ocbox-<uid>/ocbox/<project>/` when `XDG_RUNTIME_DIR` isn't set | ocbox, sandboxed modes | Per-run files: the relay sockets, the generated `opencode.json` and `AGENTS.md`, the web UI password, the `--detach` log. Private to your user. |
 | `~/.local/state/ocbox/<project>/` | ocbox, sandboxed modes | Which extra packages the project image was built with, and its build context. |
 | `~/.config/opencode/`, `~/.local/share/opencode/`, `~/.cache/opencode/` | OpenCode itself, `--no-sandbox` only | OpenCode's standard directories, including its plugin SDK - see "Running without a sandbox". |
 | `~/.config/ocbox/conf.py`, `<project>/ocbox.conf.py` | You | Optional settings. ocbox only reads them. |

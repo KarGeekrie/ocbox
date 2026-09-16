@@ -28,12 +28,12 @@ OPENCODE_CONFIG_MOUNT = "/etc/ocbox/opencode.json"
 # handles as long as the volume is mounted first (see build_podman_run_argv).
 # Singular `agent/` is accepted too, but the docs name the plural, so use it.
 AGENTS_DIR_MOUNT = "/home/ocbox/.config/opencode/agents"
-# The user's own OpenCode settings, mounted as OpenCode's *global* config.
-# Global sits below OPENCODE_CONFIG in OpenCode's precedence order, so ocbox's
-# generated config still wins on the provider endpoint while everything the
-# user puts here - crucially the model list, without which nothing is
-# selectable - is merged in. Deep-merged, not replaced: user `models` and
-# ocbox's `options.baseURL` end up in the same provider block.
+# The team's opencode.jsonc (or --opencode-config's file), mounted as OpenCode's
+# *global* config. Global sits below OPENCODE_CONFIG in OpenCode's precedence
+# order, so the config ocbox generates still wins on the provider endpoint while
+# everything in the team file - crucially the model list, without which nothing
+# is selectable - is merged in. Deep-merged, not replaced: the team's `models`
+# and ocbox's `options.baseURL` end up in the same provider block.
 USER_CONFIG_MOUNT = "/home/ocbox/.config/opencode/opencode.jsonc"
 # Same story as agents: mounted at OpenCode's documented global skills
 # location rather than registered through the `skills.paths` config key.
@@ -291,11 +291,11 @@ def check_opencode_args(args: list[str], mode: str = "tui") -> None:
 
 
 def _generate_opencode_config(base_url: str, extra_mounts: list[Path] | None = None) -> dict:
-    """Builds the single opencode.json ocbox feeds OpenCode, sandboxed or not.
+    """Builds the opencode.json ocbox generates for a sandboxed run. --no-sandbox
+    generates none: OpenCode reads opencode.jsonc, baseURL included, as written.
 
     Only what depends on the run is generated. `base_url` is the relay bridging
-    a sandboxed container to the user's LLM, or - in --no-sandbox mode -
-    opencode.jsonc's own baseURL, no relay involved. Agents and skills aren't
+    the container to the team's LLM. Agents and skills aren't
     here - they're files placed at the locations OpenCode already searches - and
     the models belong to opencode.jsonc, layered in as OpenCode's global config.
 
@@ -518,11 +518,13 @@ def run(
     st_dir = project.state_dir(slug)
     state = ProjectState.load(st_dir)
 
-    image.ensure_base_image(podman, cfg.base_image, cfg.base_os)
-
+    # Ask first: on a first run, or after an update, the base image build takes
+    # minutes, and the question shouldn't wait behind it.
     apt_pkgs, uv_pkgs = prompt_extra_packages(
         cfg, non_interactive=non_interactive, cli_apt=cli_apt, cli_uv=cli_uv
     )
+
+    image.ensure_base_image(podman, cfg.base_image, cfg.base_os)
     fingerprint = image.packages_fingerprint(
         apt_pkgs, uv_pkgs, cfg.base_image, image.base_fingerprint(cfg.base_os)
     )
@@ -705,19 +707,30 @@ def _find_or_install_opencode() -> str:
         f"ocbox: opencode not found - installing it into {local_bin.parent}...",
         file=sys.stderr,
     )
-    curl = subprocess.run(
-        ["curl", "-fsSL", OPENCODE_INSTALL_URL], capture_output=True, check=True
-    )
+    try:
+        curl = subprocess.run(
+            ["curl", "-fsSL", OPENCODE_INSTALL_URL], capture_output=True, check=True
+        )
+    except (subprocess.CalledProcessError, OSError) as exc:
+        raise NoSandboxError(
+            f"couldn't download the OpenCode installer from {OPENCODE_INSTALL_URL} "
+            f"({exc}) - check the network, or install OpenCode yourself and re-run."
+        ) from exc
     local_bin.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=local_dir, prefix="install-") as install_home:
         # The installer assumes bash (`set -euo pipefail` on its own line 2) -
         # piping into plain `sh` breaks wherever that's dash, e.g. Debian/Ubuntu.
-        subprocess.run(
-            ["bash", "-s", "--", "--no-modify-path"],
-            input=curl.stdout,
-            check=True,
-            env={**os.environ, "HOME": install_home},
-        )
+        try:
+            subprocess.run(
+                ["bash", "-s", "--", "--no-modify-path"],
+                input=curl.stdout,
+                check=True,
+                env={**os.environ, "HOME": install_home},
+            )
+        except (subprocess.CalledProcessError, OSError) as exc:
+            raise NoSandboxError(
+                f"the OpenCode installer failed ({exc}) - install OpenCode yourself and re-run."
+            ) from exc
         installed = Path(install_home) / ".opencode" / "bin" / "opencode"
         if not installed.exists():
             raise NoSandboxError(

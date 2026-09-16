@@ -139,7 +139,8 @@ The code-review report flagged <ID> in <path/to/file> L<N> with [SOTA-CHECK]
 
 ## GitLab MR review
 
-> **Prerequisite**: `glab auth status` must show authenticated against your
+> **Prerequisite**: run from `ocbox --no-sandbox`, since a sandbox has no network,
+> and `glab auth status` must show authenticated against your
 > GitLab instance (`glab auth login --hostname <your-gitlab-host>`).
 > The repository must be a GitLab remote (`git remote -v` to verify).
 
@@ -208,7 +209,8 @@ Run these steps in order:
 
 ## GitLab MR review — fixes on a dedicated branch
 
-> **Prerequisite**: `glab auth status` must show authenticated against your
+> **Prerequisite**: run from `ocbox --no-sandbox`, since a sandbox has no network,
+> and `glab auth status` must show authenticated against your
 > GitLab instance. The repository must be a GitLab remote (`git remote -v`
 > to verify).
 
@@ -287,8 +289,10 @@ Run these steps in order:
 
 ## Tuleap PR review
 
-> **Prerequisite**: `./identification.md` must contain a valid Tuleap access
-> key. The repository must be cloned locally with `origin` pointing to the
+> **Prerequisite**: run from `ocbox --no-sandbox`, since a sandbox has no network.
+> Export your Tuleap access key as `TULEAP_ACCESS_KEY` in the shell you start it
+> from. Never write the key into a file in the project, where it is one
+> `git add` away from being committed. The repository must be cloned locally with `origin` pointing to the
 > Tuleap project. Replace `<tuleap-host>` below with your Tuleap instance's
 > hostname.
 
@@ -299,9 +303,11 @@ Use the `code-review` skill to review this Tuleap pull request: <PR_ID>
 
 Run these steps in order:
 
-1. Read the Tuleap access key from ./identification.md:
-    KEY=$(grep -oP 'Tuleap key\s*:\s*\K.*' ./identification.md | tr -d '[:space:]')
-    curl -s -H "X-Auth-AccessKey: $KEY" \
+1. Check the access key is set, without ever printing it:
+    test -n "$TULEAP_ACCESS_KEY" && echo "TULEAP_ACCESS_KEY is set"
+    If it isn't, stop and ask the user to export it before starting ocbox -
+    don't ask them to paste the key into this session.
+    curl -s -H "X-Auth-AccessKey: $TULEAP_ACCESS_KEY" \
       "https://<tuleap-host>/api/v1/pull_requests/<PR_ID>"
     Extract the target branch from the response: `"branch_dest":"main"`
     Store it as: TARGET_BRANCH=<extracted_name>
@@ -318,7 +324,7 @@ Run these steps in order:
     git diff origin/<target_branch>..HEAD -- <changed_files>
 
 4. Fetch existing comments for context:
-    curl -s -H "X-Auth-AccessKey: $KEY" \
+    curl -s -H "X-Auth-AccessKey: $TULEAP_ACCESS_KEY" \
       "https://<tuleap-host>/api/v1/pull_requests/<PR_ID>/comments"
 
 5. Review ONLY the changed files from step 3.
@@ -331,7 +337,7 @@ Run these steps in order:
 6. Post the report as a PR comment:
     Use python3 to safely encode the content as JSON (avoids control character errors):
     CONTENT=$(python3 -c "import json,sys; print(json.dumps({'content': sys.stdin.read()}))" < review_report.md)
-    curl -s -H "X-Auth-AccessKey: $KEY" \
+    curl -s -H "X-Auth-AccessKey: $TULEAP_ACCESS_KEY" \
          -H "Content-Type: application/json" \
          -d "$CONTENT" \
          "https://<tuleap-host>/api/v1/pull_requests/<PR_ID>/comments"
@@ -340,8 +346,10 @@ Run these steps in order:
 
 ## Tuleap PR review — fixes on a dedicated branch
 
-> **Prerequisite**: `./identification.md` must contain a valid Tuleap access
-> key. The repository must be cloned locally with `origin` pointing to the
+> **Prerequisite**: run from `ocbox --no-sandbox`, since a sandbox has no network.
+> Export your Tuleap access key as `TULEAP_ACCESS_KEY` in the shell you start it
+> from. Never write the key into a file in the project, where it is one
+> `git add` away from being committed. The repository must be cloned locally with `origin` pointing to the
 > Tuleap project. Replace `<tuleap-host>` below with your Tuleap instance's
 > hostname.
 
@@ -354,9 +362,11 @@ Apply automatable fixes to a dedicated review branch.
 
 Run these steps in order:
 
-1. Read the Tuleap access key from ./identification.md:
-    KEY=$(grep -oP 'Tuleap key\s*:\s*\K.*' ./identification.md | tr -d '[:space:]')
-    curl -s -H "X-Auth-AccessKey: $KEY" \
+1. Check the access key is set, without ever printing it:
+    test -n "$TULEAP_ACCESS_KEY" && echo "TULEAP_ACCESS_KEY is set"
+    If it isn't, stop and ask the user to export it before starting ocbox -
+    don't ask them to paste the key into this session.
+    curl -s -H "X-Auth-AccessKey: $TULEAP_ACCESS_KEY" \
       "https://<tuleap-host>/api/v1/pull_requests/<PR_ID>"
     Extract the target branch from the response: `"branch_dest":"main"`
     Store it as: TARGET_BRANCH=<extracted_name>
@@ -402,7 +412,7 @@ Run these steps in order:
 9. Post a comment on the PR with the report + branch reference:
     Use python3 to safely encode the content as JSON (avoids control character errors):
     CONTENT=$(python3 -c "import json,sys; print(json.dumps({'content': sys.stdin.read()}))" < review_report.md)
-    curl -s -H "X-Auth-AccessKey: $KEY" \
+    curl -s -H "X-Auth-AccessKey: $TULEAP_ACCESS_KEY" \
          -H "Content-Type: application/json" \
          -d "$CONTENT" \
          "https://<tuleap-host>/api/v1/pull_requests/<PR_ID>/comments"

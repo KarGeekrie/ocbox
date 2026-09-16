@@ -96,6 +96,36 @@ def test_find_or_install_raises_if_the_installer_produces_nothing(tmp_path, monk
         sandbox._find_or_install_opencode()
 
 
+def test_find_or_install_reports_a_failed_download_cleanly(tmp_path, monkeypatch) -> None:
+    """Offline, curl fails; that used to surface as a CalledProcessError traceback."""
+    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: tmp_path / "repo" / ".ocbox")
+    failure = sandbox.subprocess.CalledProcessError(6, ["curl"])
+    with (
+        patch.object(sandbox.subprocess, "run", side_effect=failure),
+        pytest.raises(sandbox.NoSandboxError, match="couldn't download the OpenCode installer"),
+    ):
+        sandbox._find_or_install_opencode()
+
+
+def test_find_or_install_reports_a_failed_installer_cleanly(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox.Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(sandbox.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sandbox.image, "repo_local_dir", lambda: tmp_path / "repo" / ".ocbox")
+
+    def run(argv, **kwargs):
+        if argv[0] == "curl":
+            return MagicMock(stdout=b"#!/bin/bash")
+        raise sandbox.subprocess.CalledProcessError(1, argv)
+
+    with (
+        patch.object(sandbox.subprocess, "run", side_effect=run),
+        pytest.raises(sandbox.NoSandboxError, match="the OpenCode installer failed"),
+    ):
+        sandbox._find_or_install_opencode()
+
+
 # ---- run_no_sandbox ----------------------------------------
 
 

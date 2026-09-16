@@ -31,8 +31,16 @@ def prompt_extra_packages(
     if non_interactive or not sys.stdin.isatty():
         return list(cfg.extra_apt_default), list(cfg.extra_uv_default)
 
-    apt_raw = input("Add extra apt packages? (space-separated, blank to skip): ").strip()
-    uv_raw = input("Add extra Python packages via uv? (space-separated, blank to skip): ").strip()
+    # A blank answer keeps the conf.py defaults rather than meaning "none", so the
+    # prompt names what that is.
+    apt_default = " ".join(cfg.extra_apt_default) or "none"
+    uv_default = " ".join(cfg.extra_uv_default) or "none"
+    apt_raw = input(
+        f"Add extra apt packages? (space-separated; blank keeps: {apt_default}): "
+    ).strip()
+    uv_raw = input(
+        f"Add extra Python packages via uv? (space-separated; blank keeps: {uv_default}): "
+    ).strip()
 
     apt_pkgs = apt_raw.split() if apt_raw else list(cfg.extra_apt_default)
     uv_pkgs = uv_raw.split() if uv_raw else list(cfg.extra_uv_default)
