@@ -529,9 +529,10 @@ of two designs to choose - use `chat`: it reads the code but can neither edit
 files nor run commands, so nothing changes by accident.
 
 **To find bugs before a change lands, switch to `review`** (Tab, like `build`
-and `plan` - it's a primary agent). It cannot edit: editing is denied and
-commands run only with your approval, so a review never quietly rewrites the
-thing it was asked to judge. For anything beyond a quick look at a small diff
+and `plan` - it's a primary agent). It cannot change your code: the only file it
+may write is `review_report.md`, the report `code-review` produces, and commands
+run only with your approval - so a review never quietly rewrites the thing it
+was asked to judge. For anything beyond a quick look at a small diff
 it reaches for the `code-review` skill, which brings language-specific
 checklists for Python, C++ and Fortran, HPC and pybind11 checks, and test- and
 doc-gap passes - see "Default skills & agents" below. Ask it for a whole
@@ -604,8 +605,8 @@ doc gaps - with several scope modes: full project, a single file, a commit or
 branch, a GitLab MR, or a Tuleap PR) and `sota-review` (checks whether an
 implemented numerical method matches the current state of the art; runs
 standalone or as a follow-up on a `code-review` finding tagged
-`[SOTA-CHECK]`). Both are read-only findings-only unless the agent running
-them can edit - see `opencode-config/skills/code-review/README.md` for how
+`[SOTA-CHECK]`). Both only report findings unless the agent running them can
+edit code - see `opencode-config/skills/code-review/README.md` for how
 that split works with `review` vs `build`.
 
 ocbox adds two agents next to OpenCode's built-in `build` and `plan`, which it
@@ -613,7 +614,8 @@ leaves exactly as OpenCode ships them. Both are **primary agents**: Tab cycles
 through them in the terminal UI.
 
 - **`review`** - the one to reach for before a change lands. It finds bugs and
-  reports them: editing is denied, and bash is gated on your approval so
+  reports them: editing is denied except for its report, `review_report.md`, and
+  bash is gated on your approval so
   `git diff` and `git log` stay available. It drives the `code-review` skill
   above, hands `[SOTA-CHECK]` findings to `sota-review`, and never applies a
   fix itself - when you want the fixes applied, `build` runs the same skill

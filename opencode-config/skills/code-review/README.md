@@ -97,8 +97,8 @@ you launch it with (see `launch-review.md` for the exact templates):
   apply fixes on a dedicated branch and leave the original untouched.
 
 The fix mode you can actually get depends on which agent runs the skill:
-`review` (`opencode-config/agents/review.md`) denies the edit tool, so it
-always ends up report-only regardless of what the prompt asks for; `build`
+`review` (`opencode-config/agents/review.md`) may write only its report,
+`review_report.md`, so it always ends up report-only regardless of what the prompt asks for; `build`
 has full edit/bash access and can apply fixes or work on a dedicated branch.
 See `opencode-config/agents/review.md` for the reasoning.
 
