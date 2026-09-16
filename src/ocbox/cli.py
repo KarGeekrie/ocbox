@@ -87,8 +87,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run OpenCode directly on this machine instead of in a sandbox: no Podman, "
         "no network isolation, no conf.py needed. Still installs OpenCode if missing "
         "and wires up opencode-config/'s agents/skills/models. Not compatible with "
-        "--tui/--detach/--web-port/--rebuild/--apt/--uv/--yes/--config/--mount, which "
-        "are all sandbox-only.",
+        "--tui/--detach/--web-port/--rebuild/--apt/--uv/--yes/--config/--mount/--dry-run, "
+        "which are all sandbox-only.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the exact `podman run` command ocbox would use and exit, without "
+        "starting anything. Still runs the package prompt and image build, so the "
+        "printed command is real and copy-pasteable - useful to debug a sandbox that "
+        "fails to start.",
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -198,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
             "--yes": args.yes,
             "--config": args.config is not None,
             "--mount": args.mount is not None,
+            "--dry-run": args.dry_run,
         }
         conflicts = [flag for flag, present in sandbox_only.items() if present]
         if conflicts:
@@ -308,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
             opencode_args=opencode_args,
             detach=args.detach,
             extra_mounts=extra_mounts,
+            dry_run=args.dry_run,
         )
     except (PodmanError, ConfigError, SandboxBusyError) as exc:
         print(f"ocbox: {exc}", file=sys.stderr)

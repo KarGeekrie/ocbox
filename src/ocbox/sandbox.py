@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -506,6 +507,7 @@ def run(
     host_web_port: int | None = None,
     detach: bool = False,
     extra_mounts: list[Path] | None = None,
+    dry_run: bool = False,
 ) -> int:
     if detach and mode != "web":
         raise ValueError("detach only applies to mode='web' - there's nothing to attach it to")
@@ -613,6 +615,16 @@ def run(
         pids_limit=cfg.pids_limit,
         extra_mounts=list(extra_mounts or []),
     )
+
+    if dry_run:
+        argv = build_podman_run_argv(plan)
+        command = " ".join(shlex.quote(part) for part in [podman.binary, *argv])
+        print(
+            "ocbox: --dry-run, not launching. This is the exact command ocbox would "
+            "run - copy-paste it to reproduce a sandbox-startup failure directly:\n"
+            f"\n{command}\n"
+        )
+        return 0
 
     if detach:
         log_path = run_dir / "ocbox.log"

@@ -49,6 +49,7 @@ def mocked_run_env(tmp_path, monkeypatch):
         patch("ocbox.sandbox.launch") as mock_launch,
     ):
         mock_podman_cls.return_value.list_containers.return_value = []
+        mock_podman_cls.return_value.binary = "podman"
 
         mock_image.repo_config_dir.return_value = data_dir
         mock_image.packages_fingerprint.return_value = "fp"
@@ -357,6 +358,29 @@ def test_run_mounts_a_sandbox_agents_md_listing_what_is_installed(
     assert "Extra system packages: git." in text
     assert "Network: none" in text
     assert "# Environment: your machine" not in text
+
+
+def test_run_dry_run_prints_the_podman_argv_and_returns_without_launching(
+    tmp_path, mocked_run_env, capsys
+) -> None:
+    exit_code = sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, dry_run=True)
+
+    assert exit_code == 0
+    mocked_run_env["network"].start_llm_relay.assert_not_called()
+    mocked_run_env["launch"].assert_not_called()
+
+    out = capsys.readouterr().out
+    assert "podman run" in out
+    slug = project.project_slug(tmp_path)
+    assert f"ocbox-{slug}" in out
+    assert f"{tmp_path}:/workspace:rw" in out
+
+
+def test_run_dry_run_still_builds_the_image_first(tmp_path, mocked_run_env) -> None:
+    """The printed command should name a real, currently-valid image tag - so
+    the image build isn't skipped, only the container launch/relays are."""
+    sandbox.run(_cfg(), tmp_path, mode="web", non_interactive=True, dry_run=True)
+    mocked_run_env["image"].ensure_base_image.assert_called_once()
 
 
 def test_run_asks_about_packages_before_building_the_base_image(tmp_path, mocked_run_env) -> None:

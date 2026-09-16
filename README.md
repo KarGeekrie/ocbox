@@ -458,7 +458,15 @@ Useful flags:
 | `--config PATH` | Use a conf.py other than `~/.config/ocbox/conf.py` |
 | `--detach` / `-d` | Background the sandbox so it survives closing the terminal (web mode only) |
 | `--no-sandbox` | Run OpenCode directly on the host - no Podman, no isolation at all |
+| `--dry-run` | Print the exact `podman run` command ocbox would use and exit, without starting anything |
 | `-- ARGS...` | Everything after `--` is forwarded to OpenCode itself |
+
+`--dry-run` is a debugging aid: it still runs the package prompt and image
+build, so the printed command names a real, currently-valid image and real
+generated file paths, and can be copy-pasted straight into a shell to
+reproduce a sandbox that fails to start (e.g. a mount rejected by the host
+with `OCI permission denied`) without reverse-engineering ocbox's own argv
+construction by hand.
 
 ## Workflow
 

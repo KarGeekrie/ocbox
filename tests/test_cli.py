@@ -129,6 +129,22 @@ def test_main_passes_detach_through(mock_run, mock_config, mock_preflight) -> No
     assert mock_run.call_args.kwargs["detach"] is True
 
 
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", return_value=0)
+def test_main_passes_dry_run_through(mock_run, mock_config, mock_preflight) -> None:
+    main(["--dry-run"])
+    assert mock_run.call_args.kwargs["dry_run"] is True
+
+
+@patch("ocbox.cli.run_preflight")
+@patch("ocbox.cli.load_config")
+@patch("ocbox.cli.run", return_value=0)
+def test_main_defaults_dry_run_to_false(mock_run, mock_config, mock_preflight) -> None:
+    main([])
+    assert mock_run.call_args.kwargs["dry_run"] is False
+
+
 @patch(
     "ocbox.cli.update_check.check",
     return_value=UpdateStatus(required_tag="v9.9.9", current_tag="v1.0.0"),
@@ -203,6 +219,7 @@ def test_main_no_sandbox_forwards_opencode_args(mock_run_no_sandbox) -> None:
         "--yes",
         "--config=x",
         "--mount=/tmp",
+        "--dry-run",
     ],
 )
 def test_main_rejects_no_sandbox_combined_with_sandbox_only_flags(flag, capsys) -> None:
