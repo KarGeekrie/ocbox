@@ -769,11 +769,15 @@ the volumes, and `podman volume rm` removes one you no longer need.
 pip install -e ".[dev]"
 pytest                                    # unit tests, no podman required
 RUN_PODMAN_INTEGRATION=1 pytest tests/integration   # requires real podman
+RUN_OPENCODE_INTEGRATION=1 pytest tests/integration/test_opencode_real.py  # real OpenCode
 ruff check src tests
 ```
 
-CI runs the same checks, the integration suite included, on every pull
-request (`.github/workflows/ci.yml`).
+CI runs the same checks, both integration suites included, on every pull
+request (`.github/workflows/ci.yml`). The real OpenCode suite also runs weekly:
+the sandbox image always installs the current OpenCode, so a new OpenCode
+release can change how it loads the team's agents, skills and configuration
+without any commit to this repository.
 
 ## What still writes outside the checkout
 
