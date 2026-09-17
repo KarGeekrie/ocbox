@@ -150,6 +150,24 @@ problème est dans le storage podman lui-même (`podman info --format
 partie SELinux/`noexec` plus haut dans la conversation.
 
 Si l'exemple 1 passe mais que le vrai `ocbox` échoue, ajoute les flags
-d'ocbox un par un sur l'exemple 2 (`--init`, `--read-only`, `--userns
-keep-id`, `--cap-drop ALL`, `--security-opt no-new-privileges`) jusqu'à
-isoler lequel déclenche l'échec.
+d'ocbox un par un sur l'exemple 2 jusqu'à isoler lequel déclenche l'échec.
+Delta complet entre l'exemple 2 et `build_podman_run_argv` (sandbox.py) :
+
+| Flag/option | Exemple 2 | ocbox réel | Pourquoi |
+|---|---|---|---|
+| `--name` + `--label ocbox.*` | absent | présent | Identification pour `ocbox list/stop/attach` - sans impact sur l'exec |
+| `--userns keep-id` | absent (root/UID0 mappé rootless par défaut) | présent | Remappe l'UID conteneur pour matcher l'UID host - fichiers écrits dans `/workspace` t'appartiennent, pas à un UID namespace arbitraire |
+| `--cap-drop ALL` | absent (capabilities par défaut) | présent | Retire toutes les capabilities Linux |
+| `--security-opt no-new-privileges` | absent | présent | Bloque l'escalade de privilèges |
+| `--read-only` | absent (rootfs writable) | présent | Rootfs en lecture seule - rien n'est persistant hors des mounts explicites |
+| `--tmpfs /tmp:rw,mode=1777` | absent | présent | Compagnon obligatoire de `--read-only` : sans ça, rien n'écrit dans `/tmp` |
+| `--init` | absent | présent | Le flag qui plante sur `/dev/init` si le storage podman n'est pas exécutable |
+| Volume nommé `/home/ocbox` | absent (`/root` = couche writable, perdue au `--rm`) | présent | Persistance du home (venv uv, état OpenCode) entre les runs - nécessaire *parce que* `--read-only` empêche d'écrire ailleurs |
+| `-e HOME=/home/ocbox` + `XDG_*` | absent (défauts root) | présent | Pointe OpenCode/uv vers ce home persistant plutôt que `/root` |
+| `--env-file` (token web) | N/A (pas de mode web ici) | présent | Secret jamais en `-e` inline (visible via `podman inspect`) |
+| `-v opencode_config:/etc/ocbox/opencode.json:ro` | absent | présent | Config générée par run (override `baseURL`), séparée du `opencode.jsonc` statique de l'équipe |
+
+Le plus pertinent pour un `Permission denied` à l'exec : `--init`,
+`--read-only` et `--userns keep-id` sont les trois qui touchent à *qui peut
+exécuter quoi où*. Les autres (labels, capabilities, env-vars) ne changent
+rien côté exec/storage.
