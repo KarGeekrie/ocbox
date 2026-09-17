@@ -31,11 +31,11 @@ the prompt.
 
 ## What's here, and what isn't
 
-This directory holds the team's additional agents: `chat`, for talking through
-code without changing it, and `review`, for finding bugs in a change. Both are
-`mode: primary`, so Tab cycles through them next to OpenCode's `build` and
-`plan` - reviewing is meant to be one keystroke away, not buried behind a
-subagent call. `review` can't change code by design (see below): the only file
+This directory holds the team's additional agents: `chat`, a general-purpose
+conversational assistant not scoped to this project's code, and `review`, for
+finding bugs in a change. Both are `mode: primary`, so Tab cycles through them
+next to OpenCode's `build` and `plan` - reviewing is meant to be one keystroke
+away, not buried behind a subagent call. `review` can't change code by design (see below): the only file
 it may write is `review_report.md`, the report `code-review` produces. It
 reaches for the `code-review`/`sota-review` skills in `../skills/` for anything
 beyond a small diff; applying the fixes those skills can propose needs `build`
@@ -74,6 +74,16 @@ nothing else.
 
 Both deny `webfetch`: they work from the code in front of them, and in a
 sandbox, which has no network, a fetch could only fail.
+
+`chat` goes further still: it has no filesystem access of its own at all.
+`permission.read: deny` alone isn't enough for that - `read` only gates the
+`read` tool, and `grep`/`glob`/`list` aren't in the `permission` key list
+above, so they'd stay wide open. `chat` removes all four outright with
+`tools: {read: false, grep: false, glob: false, list: false}` - the concrete
+case for the `tools: {edit: false}` alternative mentioned above. The only
+files it ever sees are ones the user attaches to a message with `@path`,
+which OpenCode inlines into the conversation directly rather than through a
+tool call, so it keeps working under `tools.read: false`.
 
 ## How ocbox loads them
 
