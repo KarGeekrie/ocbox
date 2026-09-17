@@ -223,6 +223,93 @@ qu'il tourne.
 À la fin, arrête les deux relais host : `kill %1 %2` (ou les pids
 affichés).
 
+## Composer l'AGENTS.md global (environnement + facts + règles d'équipe)
+
+Le vrai ocbox ne mounte jamais `opencode-config/AGENTS.md` tel quel. Il
+compose un fichier par run, `_compose_global_agents_md()` (sandbox.py:431),
+en concaténant trois morceaux, séparés par une ligne vide :
+
+1. `opencode-config/environments/<environment>.md` - où l'agent tourne.
+   Exactement deux fichiers, un par mode d'exécution (pas web vs tui -
+   sandbox vs pas de sandbox) : `sandbox.md` si ça passe par podman
+   (web *et* tui), `no-sandbox.md` pour `--no-sandbox`.
+2. Un bloc de "facts" généré en Python (`_sandbox_facts()`), propre à ce
+   run précis - réseau, paquets apt/uv effectivement installés, mounts
+   `--mount`. Vide en `--no-sandbox` (rien à décrire).
+3. `opencode-config/AGENTS.md` - les règles d'équipe, identiques dans les
+   deux modes.
+
+Volontairement pas un moteur de template (Jinja2 ou équivalent) : les
+fichiers `environments/*.md` et `AGENTS.md` sont censés être édités à la
+main par l'équipe en markdown pur - de la syntaxe de contrôle mélangée au
+texte serait plus facile à casser en éditant, et ça ajouterait une
+dépendance pour un projet volontairement stdlib-only. Le bloc facts, lui,
+n'a rien de statique à templater : il dépend entièrement de l'état du
+run, donc du vrai code Python de toute façon.
+
+Reproduis le même mécanisme sur les exemples précédents avec un petit
+script, sans dépendance :
+
+```python
+#!/usr/bin/env python3
+"""Reprend _compose_global_agents_md() de sandbox.py, en simplifié."""
+import sys
+from pathlib import Path
+
+CONFIG_DIR = Path("/chemin/vers/ocbox/opencode-config")
+
+
+def sandbox_facts(apt_pkgs: list[str], uv_pkgs: list[str]) -> list[str]:
+    return [
+        "## This sandbox",
+        "",
+        "- Network: none. The only thing reachable is the LLM, through the relay.",
+        "- Extra system packages: " + (", ".join(apt_pkgs) or "none") + ".",
+        "- Extra Python packages (uv): " + (", ".join(uv_pkgs) or "none") + ".",
+    ]
+
+
+def compose(environment: str, facts: list[str]) -> str:
+    sections = []
+    env_file = CONFIG_DIR / "environments" / f"{environment}.md"
+    if env_file.is_file():
+        sections.append(env_file.read_text().strip())
+    if facts:
+        sections.append("\n".join(facts).strip())
+    team_rules = CONFIG_DIR / "AGENTS.md"
+    if team_rules.is_file():
+        sections.append(team_rules.read_text().strip())
+    return "\n\n".join(sections) + "\n"
+
+
+if __name__ == "__main__":
+    environment = sys.argv[1]  # "sandbox" ou "no-sandbox"
+    facts = sandbox_facts(["git"], ["numpy"]) if environment == "sandbox" else []
+    print(compose(environment, facts), end="")
+```
+
+Pour les exemples 2/3 (réseau isolé, l'analogue du vrai mode sandbox) :
+
+```bash
+python3 compose_agents_md.py sandbox > ./run/AGENTS.md
+```
+
+Pour l'exemple 1 (réseau normal, l'analogue de `--no-sandbox`) :
+
+```bash
+python3 compose_agents_md.py no-sandbox > ./run/AGENTS.md
+```
+
+Puis mount-le au même endroit que dans le vrai ocbox (`GLOBAL_AGENTS_MD_MOUNT`) :
+
+```bash
+-v "$(pwd)/run/AGENTS.md":/root/.config/opencode/AGENTS.md:ro
+```
+
+Vérifie que ça a marché avec la commande de la section suivante (le
+marqueur du fichier environnement doit apparaître dans le system prompt
+qu'OpenCode envoie réellement).
+
 ## Vérifier que les mounts arrivent vraiment à OpenCode
 
 Monter un fichier au bon endroit ne prouve pas qu'OpenCode le lit ou le
