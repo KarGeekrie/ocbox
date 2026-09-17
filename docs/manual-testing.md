@@ -141,6 +141,88 @@ le relai côté conteneur.
 
 À la fin, arrête le relai host : `kill %1` (ou le pid affiché).
 
+## Exemple 3 - servir l'UI web à travers le relai
+
+Ajoute le service web par-dessus l'exemple 2 : un second relai, dans le
+sens inverse du relai LLM (ingress au lieu d'egress), pour le port web
+plutôt que le LLM - toujours sans `-p`/`--publish`, tout passe par des
+sockets.
+
+`Dockerfile` : rien à ajouter - `python3` et `opencode` sont déjà là depuis
+les exemples précédents.
+
+`entrypoint.sh` : remplace `exec opencode "$@"` de l'exemple 2 par le
+service web (après le relai LLM, qui reste identique) :
+
+```sh
+: "${OPENCODE_SERVER_PASSWORD:?refusing to start web mode without a password}"
+
+# `serve`, pas `web` : `opencode web` appelle xdg-open, absent de l'image,
+# qui plante avec une stack trace au lieu de juste servir - `serve` sert
+# la même UI sans ça.
+opencode serve --hostname 127.0.0.1 --port 4096 >/dev/null &
+OPENCODE_PID=$!
+
+i=0
+until python3 -c "
+import socket, sys
+s = socket.socket(); s.settimeout(0.2)
+sys.exit(0 if s.connect_ex(('127.0.0.1', 4096)) == 0 else 1)
+" 2>/dev/null; do
+    i=$((i + 1))
+    [ "$i" -ge 150 ] && { echo "opencode serve never started" >&2; exit 1; }
+    sleep 0.2
+done
+
+# Web ingress : socket Unix partagé -> (relai host) -> navigateur ;
+# ce côté-ci -> opencode serve. Symétrique au relai LLM, sens inverse.
+python3 /usr/local/lib/ocbox/relay.py serve-unix /run/ocbox/web.sock \
+    --connect-tcp "127.0.0.1:4096" &
+
+wait "$OPENCODE_PID"
+```
+
+Côté host, en plus du relai LLM de l'exemple 2, attends que le conteneur
+crée le socket web avant de démarrer le second relai (`serve-tcp` cette
+fois côté host, sens inverse du relai LLM) :
+
+```bash
+mkdir -p ./run
+python3 relay.py serve-unix ./run/llm.sock --connect-tcp <ip-du-llm>:<port> &
+
+while [ ! -S ./run/web.sock ]; do sleep 0.2; done
+python3 relay.py serve-tcp 127.0.0.1:8888 --connect-unix ./run/web.sock &
+```
+
+`127.0.0.1:8888` est le port que le navigateur contacte réellement.
+
+Lance le conteneur - toujours `--network none`, aucun `-p`/`--publish`,
+deux `-e` en plus pour l'auth Basic (sinon OpenCode expose l'UI sans mot
+de passe) :
+
+```bash
+podman run --rm \
+  --network none \
+  -v "$(pwd)":/workspace:rw \
+  -v "$(pwd)/run":/run/ocbox:rw \
+  -v /chemin/vers/ocbox/opencode-config/agents:/root/.config/opencode/agents:ro \
+  -v /chemin/vers/ocbox/opencode-config/skills:/root/.config/opencode/skills:ro \
+  -v /chemin/vers/ocbox/opencode-config/opencode.jsonc:/root/.config/opencode/opencode.jsonc:ro \
+  -e OPENCODE_SERVER_PASSWORD=change-moi \
+  -e OPENCODE_SERVER_USERNAME=opencode \
+  ocbox-basic-test
+```
+
+Puis ouvre `http://opencode:change-moi@127.0.0.1:8888` (ou juste
+`127.0.0.1:8888` et rentre les identifiants dans la popup du navigateur).
+
+Pas de `-it` ici, contrairement aux exemples 1/2 : `opencode serve` tourne
+en arrière-plan, `wait "$OPENCODE_PID"` garde le conteneur vivant tant
+qu'il tourne.
+
+À la fin, arrête les deux relais host : `kill %1 %2` (ou les pids
+affichés).
+
 ## Pour diagnostiquer un `Permission denied` sur l'exec
 
 Si l'exemple 1 (le plus simple, sans `--init`/`--read-only`/`--userns` ni
