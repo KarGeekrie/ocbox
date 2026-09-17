@@ -223,6 +223,88 @@ qu'il tourne.
 À la fin, arrête les deux relais host : `kill %1 %2` (ou les pids
 affichés).
 
+## Vérifier que les mounts arrivent vraiment à OpenCode
+
+Monter un fichier au bon endroit ne prouve pas qu'OpenCode le lit ou le
+prend en compte - un mauvais nom de clé dans `opencode.jsonc`, un fichier
+au mauvais chemin de découverte, et OpenCode l'ignore silencieusement sans
+erreur (voir le commentaire de `_generate_opencode_config` dans
+`sandbox.py` : `additionalProperties=false` dans le schéma, mais le
+runtime jette les clés inconnues sans le dire). Quatre vérifications
+directes, chacune sur ce qu'OpenCode expose réellement, pas sur le
+filesystem - reprises telles quelles de `tests/integration/test_opencode_real.py`,
+la suite qui tourne contre le vrai binaire en CI.
+
+Les trois premières ne font aucun appel LLM - lance-les directement sur
+l'exemple 1 ou 2, en remplaçant le CMD :
+
+**`opencode.jsonc` → `~/.config/opencode/opencode.jsonc`**
+
+```bash
+podman run --rm -v ... ocbox-basic-test opencode debug config
+```
+
+Imprime le JSON du config *fusionné*. Vérifie que les clés attendues du
+fichier de l'équipe sont là (`provider.local.models`,
+`permission.external_directory`, `share`, ...) - si une section entière
+manque, soit le mount a raté, soit une clé du fichier source a une faute
+de frappe qu'OpenCode a silencieusement ignorée.
+
+**`agents/` → `~/.config/opencode/agents/`**
+
+```bash
+podman run --rm -v ... ocbox-basic-test opencode agent list
+```
+
+Chaque agent apparaît en `<nom> (primary|subagent|all)`. Vérifie que
+chaque `.md` de `opencode-config/agents/` apparaît sous son nom de
+fichier (sans l'extension), et qu'un fichier qui ne doit *pas* être un
+agent (`README.md`) n'apparaît pas.
+
+**`skills/` → `~/.config/opencode/skills/`**
+
+```bash
+podman run --rm -v ... ocbox-basic-test opencode debug skill
+```
+
+Liste JSON avec un champ `location` par skill, pointant vers le chemin
+monté (`/root/.config/opencode/skills/<nom>/SKILL.md` dans ces exemples
+basiques, `/home/ocbox/.config/opencode/skills/...` dans le vrai ocbox).
+Vérifie que chaque sous-dossier de `opencode-config/skills/` contenant un
+`SKILL.md` apparaît, avec le bon `location`.
+
+**`AGENTS.md` → `~/.config/opencode/AGENTS.md`**
+
+Pas de commande `debug` qui l'affiche directement - AGENTS.md n'est pas
+interrogeable, il est juste envoyé au modèle. La seule façon fiable de
+vérifier qu'il est bien reçu est de capturer la vraie requête qu'OpenCode
+envoie au LLM et de regarder son system prompt. Réutilise
+`tests/integration/stub_llm.py` tel quel (stdlib pur, aucune dépendance) :
+
+```python
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/chemin/vers/ocbox/tests/integration")
+from stub_llm import StubLLM
+
+with StubLLM() as llm:
+    print(f"stub LLM sur 127.0.0.1:{llm.port}")
+    input("lance ta session opencode pointée dessus, puis Entrée ici...")
+    requests = llm.tool_requests()
+    assert requests, "OpenCode n'a jamais contacté le LLM"
+    system = llm.system_prompt(requests[0])
+    marker = Path("/chemin/vers/ocbox/opencode-config/AGENTS.md").read_text().splitlines()[0]
+    assert marker in system, "AGENTS.md de l'équipe absent du system prompt"
+    print("AGENTS.md bien reçu")
+```
+
+Démarre ce script, note le port affiché, pointe `opencode.jsonc` dessus
+(comme dans `_config_pointing_at` du vrai test - remplace juste le
+`baseURL`), lance une session (`opencode run --model local/<un-modèle>
+"salut"` suffit, pas besoin d'un vrai prompt de travail), puis appuie sur
+Entrée dans le script pour qu'il vérifie.
+
 ## Pour diagnostiquer un `Permission denied` sur l'exec
 
 Si l'exemple 1 (le plus simple, sans `--init`/`--read-only`/`--userns` ni
